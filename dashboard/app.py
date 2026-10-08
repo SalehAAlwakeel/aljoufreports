@@ -25,7 +25,7 @@ for extra_path in (PROJECT_ROOT / "src", HERE):
         sys.path.insert(0, str(extra_path))
 
 from aljouf_report.config import load_config  # noqa: E402
-from aljouf_report.models import PLATFORM_AR, SENTIMENT_AR  # noqa: E402
+from aljouf_report.models import DEMO_MODEL_TAG, PLATFORM_AR, SENTIMENT_AR  # noqa: E402
 from aljouf_report.storage import Database  # noqa: E402
 from theme import SENTIMENT_COLORS, apply_rtl, header, rtl_layout  # noqa: E402
 
@@ -171,6 +171,20 @@ subtitle = "المكتب الاستراتيجي لتطوير منطقة الجو
 if latest_run_time is not None and pd.notna(latest_run_time):
     subtitle += f" · آخر تحديث {latest_run_time.strftime('%Y-%m-%d %H:%M')} UTC"
 header("📊 لوحة وسائل التواصل الاجتماعي", subtitle)
+
+# Synthetic data must be impossible to mistake for a real collection run.
+is_demo = (
+    not comments_df.empty
+    and "model" in comments_df.columns
+    and (comments_df["model"] == DEMO_MODEL_TAG).any()
+)
+if is_demo:
+    st.warning(
+        "⚠️ **بيانات تجريبية (Demo)** — هذه الأرقام والتعليقات مولَّدة تلقائياً "
+        "لعرض اللوحة فقط وليست بيانات حقيقية. "
+        "لجمع البيانات الفعلية: اضبط `APIFY_TOKEN` و`OPENAI_API_KEY` ثم شغّل "
+        "`python -m aljouf_report run`."
+    )
 
 
 def owned_totals(df: pd.DataFrame) -> tuple[int | None, int | None]:

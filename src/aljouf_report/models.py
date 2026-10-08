@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 
 SentimentLabel = Literal["Positive", "Negative", "Neutral"]
 
+# Written into sentiments.model by the demo seeder. The dashboard looks for it
+# so synthetic data can never be mistaken for a real collection run.
+DEMO_MODEL_TAG = "demo-seed"
+
 SENTIMENT_LABELS: tuple[str, ...] = ("Positive", "Negative", "Neutral")
 
 # Arabic display labels for the dashboard and email.

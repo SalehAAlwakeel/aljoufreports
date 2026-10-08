@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import AppConfig, load_config
 from .models import (
+    DEMO_MODEL_TAG,
     FollowerSnapshot,
     NewsArticle,
     SentimentResult,
@@ -121,6 +122,106 @@ DEMO_COMMENTS: list[tuple[str, str, str]] = [
         "حسبي الله على كل مسؤول ما يسمع صوت المواطن",
         "Negative",
         "تعبير عن استياء شديد من عدم الاستجابة للمواطنين.",
+    ),
+    (
+        "من جد الجوف تغيرت في السنتين الأخيرة، الله يتمم على خير",
+        "Positive",
+        "ملاحظة تحسن ملموس في المنطقة مع دعاء بالتمام.",
+    ),
+    (
+        "تسلم ايديكم على التنظيم، الفعالية كانت ممتعة للعائلة",
+        "Positive",
+        "شكر على التنظيم وإشادة بملاءمة الفعالية للعائلات.",
+    ),
+    (
+        "ما شاء الله، الزيتون عندنا صار له اسم عالمي 🫒",
+        "Positive",
+        "اعتزاز بوصول منتج المنطقة إلى شهرة عالمية.",
+    ),
+    (
+        "أخيراً صار فيه حدائق للأطفال، شكراً من القلب",
+        "Positive",
+        "امتنان صادق لتوفير حدائق للأطفال.",
+    ),
+    (
+        "بالتوفيق للمكتب، نتابعكم ونشوف الجهود",
+        "Positive",
+        "تشجيع ودعم مع متابعة إيجابية للجهود.",
+    ),
+    (
+        "الموقع الإلكتروني زحمة وما يفتح، صلحوه الله يهديكم",
+        "Negative",
+        "شكوى من بطء الموقع وتعذر الوصول إليه.",
+    ),
+    (
+        "من سنة أرفع شكوى وما حد تحرك ساكن",
+        "Negative",
+        "استياء من تجاهل الشكاوى لمدة عام كامل.",
+    ),
+    (
+        "ليه كل المشاريع في سكاكا وباقي المحافظات منسية؟",
+        "Negative",
+        "انتقاد لتركيز المشاريع في مدينة واحدة وإغفال غيرها.",
+    ),
+    (
+        "ما شاء الله شكل الصور حلو 🙄 بس الواقع شي ثاني تماماً",
+        "Negative",
+        "سخرية؛ المدح الظاهري للصور يقابله نفي للواقع.",
+    ),
+    (
+        "خدمة العملاء صفر، الواتساب ما يرد والهاتف مشغول دايم",
+        "Negative",
+        "شكوى من تعذر التواصل عبر جميع القنوات.",
+    ),
+    (
+        "سفلتة الطريق للمخرج الشمالي متى؟ صار لها سنتين وعد",
+        "Negative",
+        "مطالبة بتنفيذ وعد سفلتة متأخر منذ سنتين.",
+    ),
+    (
+        "يا أخي ردوا على الناس، احترموا وقتنا",
+        "Negative",
+        "مطالبة غاضبة بالرد واحترام وقت المتعاملين.",
+    ),
+    (
+        "وعود وبس، تعبنا والله 💔",
+        "Negative",
+        "إحباط من تكرار الوعود دون تنفيذ.",
+    ),
+    (
+        "فيه وظائف للخريجين الجدد؟",
+        "Neutral",
+        "استفسار عن توفر وظائف للخريجين.",
+    ),
+    (
+        "وين مقر المكتب بالضبط؟",
+        "Neutral",
+        "سؤال عن الموقع الجغرافي للمقر.",
+    ),
+    (
+        "هل التسجيل متاح للمقيمين ولا للسعوديين بس؟",
+        "Neutral",
+        "استفسار عن شروط الأهلية للتسجيل.",
+    ),
+    (
+        "متى ينزل التقرير السنوي؟",
+        "Neutral",
+        "سؤال عن موعد نشر التقرير السنوي.",
+    ),
+    (
+        "ايش شروط الاستثمار الزراعي في المنطقة؟",
+        "Neutral",
+        "استفسار عن شروط الاستثمار الزراعي.",
+    ),
+    (
+        "هل فيه مواصلات توصل للموقع؟",
+        "Neutral",
+        "سؤال تنظيمي عن توفر المواصلات.",
+    ),
+    (
+        "ممكن رقم تواصل مباشر؟",
+        "Neutral",
+        "طلب وسيلة تواصل مباشرة.",
     ),
 ]
 
@@ -308,35 +409,37 @@ def _demo_comments(
     comments: list[SocialComment] = []
     sentiments: list[SentimentResult] = []
 
-    # Repeat the sample set so the charts have enough volume to look real.
-    for cycle in range(3):
-        for index, (text, label, reason) in enumerate(DEMO_COMMENTS):
-            entity = rng.choice(owned)
-            platform = rng.choice([p for p in platforms if entity.account(p)] or platforms)
-            published = now - timedelta(
-                days=rng.uniform(0, window - 0.2), hours=rng.randint(0, 23)
+    # Each sample text is used exactly once. Repeating them to inflate volume
+    # made the dashboard look like it had a data-duplication bug.
+    for index, (text, label, reason) in enumerate(DEMO_COMMENTS):
+        entity = rng.choice(owned)
+        platform = rng.choice([p for p in platforms if entity.account(p)] or platforms)
+        published = now - timedelta(
+            days=rng.uniform(0, window - 0.2), hours=rng.randint(0, 23)
+        )
+        comment = SocialComment(
+            entity_key=entity.key,
+            platform=platform,
+            text=text,
+            # "demo_" prefixes make it obvious at a glance that this is not
+            # production data.
+            author=f"demo_user_{index:02d}",
+            post_url=f"https://example.com/{platform}/post/{index:02d}",
+            comment_url=f"https://example.com/{platform}/comment/{index:02d}",
+            native_id=f"demo-{index}",
+            published_at=published,
+            likes=rng.randint(0, 180),
+            fetched_at=now,
+        )
+        comments.append(comment)
+        sentiments.append(
+            SentimentResult(
+                comment_hash=comment.comment_hash,
+                label=label,  # type: ignore[arg-type]
+                reason_ar=reason,
+                confidence=round(rng.uniform(0.86, 0.99), 2),
+                model=DEMO_MODEL_TAG,
+                analyzed_at=now,
             )
-            comment = SocialComment(
-                entity_key=entity.key,
-                platform=platform,
-                text=text,
-                author=f"user_{cycle}{index:02d}",
-                post_url=f"https://example.com/{platform}/post/{cycle}{index:02d}",
-                comment_url=f"https://example.com/{platform}/comment/{cycle}{index:02d}",
-                native_id=f"demo-{cycle}-{index}",
-                published_at=published,
-                likes=rng.randint(0, 180),
-                fetched_at=now,
-            )
-            comments.append(comment)
-            sentiments.append(
-                SentimentResult(
-                    comment_hash=comment.comment_hash,
-                    label=label,  # type: ignore[arg-type]
-                    reason_ar=reason,
-                    confidence=round(rng.uniform(0.86, 0.99), 2),
-                    model="demo-seed",
-                    analyzed_at=now,
-                )
-            )
+        )
     return comments, sentiments

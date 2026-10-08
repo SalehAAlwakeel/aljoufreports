@@ -106,28 +106,78 @@ def seed_demo(
     )
 
 
+def _port_is_free(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        # connect_ex succeeds only when something is already listening.
+        return sock.connect_ex((host if host != "0.0.0.0" else "127.0.0.1", port)) != 0
+
+
 @app.command()
 def dashboard(
     port: int = typer.Option(8501, help="Port to serve the dashboard on."),
     host: str = typer.Option("localhost", help="Address to bind."),
+    strict_port: bool = typer.Option(
+        False, "--strict-port", help="Fail instead of moving to the next free port."
+    ),
 ):
     """Launch the Streamlit dashboard."""
+    config = _boot()
+
+    if not config.db_path.exists():
+        console.print(
+            f"[yellow]No database at[/yellow] {config.db_path}\n"
+            "The dashboard will open but have nothing to show. Populate it first:\n"
+            "  [bold]python -m aljouf_report run[/bold]        (live data)\n"
+            "  [bold]python -m aljouf_report seed-demo[/bold]  (synthetic data)"
+        )
+
+    # A stale dashboard left running on this port is the most common cause of a
+    # blank page: Streamlit cannot bind, so the browser has no server to talk to.
+    requested = port
+    if not _port_is_free(host, port):
+        if strict_port:
+            console.print(
+                f"[red]Port {port} is already in use.[/red] "
+                f"Stop the process using it, or pass --port with another number."
+            )
+            raise typer.Exit(1)
+        for candidate in range(port + 1, port + 21):
+            if _port_is_free(host, candidate):
+                port = candidate
+                break
+        else:
+            console.print(f"[red]No free port found in {requested}-{requested + 20}.[/red]")
+            raise typer.Exit(1)
+        console.print(
+            f"[yellow]Port {requested} is already in use[/yellow] "
+            f"(another dashboard is probably still running). Using {port} instead."
+        )
+
+    url = f"http://{host}:{port}"
+    console.print(f"[cyan]Starting dashboard:[/cyan] [bold]{url}[/bold]")
+    console.print("[dim]Press Ctrl+C to stop.[/dim]")
+
     app_path = PROJECT_ROOT / "dashboard" / "app.py"
-    console.print(f"[cyan]Starting dashboard[/cyan] http://{host}:{port}")
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(app_path),
-            "--server.port",
-            str(port),
-            "--server.address",
-            host,
-        ],
-        check=False,
-    )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(app_path),
+                "--server.port",
+                str(port),
+                "--server.address",
+                host,
+            ],
+            check=False,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[dim]Dashboard stopped.[/dim]")
 
 
 @app.command("send-email")

@@ -16,11 +16,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-# Allow `streamlit run dashboard/app.py` without installing the package.
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC = PROJECT_ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+# Allow `streamlit run dashboard/app.py` without installing the package, and
+# from any working directory.
+HERE = Path(__file__).resolve().parent
+PROJECT_ROOT = HERE.parent
+for extra_path in (PROJECT_ROOT / "src", HERE):
+    if str(extra_path) not in sys.path:
+        sys.path.insert(0, str(extra_path))
 
 from aljouf_report.config import load_config  # noqa: E402
 from aljouf_report.models import PLATFORM_AR, SENTIMENT_AR  # noqa: E402
@@ -134,7 +136,7 @@ with st.sidebar:
     )
 
     st.divider()
-    if st.button("🔄 تحديث البيانات", use_container_width=True):
+    if st.button("🔄 تحديث البيانات"):
         st.cache_data.clear()
         st.rerun()
 
@@ -275,7 +277,7 @@ with tab_growth:
                     text_auto=".2s",
                 )
                 st.plotly_chart(
-                    rtl_layout(fig, height=460), use_container_width=True
+                    rtl_layout(fig, height=460)
                 )
             else:
                 st.caption(
@@ -312,7 +314,7 @@ with tab_growth:
                         trace.marker.update(size=5)
                         trace.opacity = 0.5
                 st.plotly_chart(
-                    rtl_layout(fig, height=480), use_container_width=True
+                    rtl_layout(fig, height=480)
                 )
 
             st.markdown("#### المتابعون حسب المنصة (آخر تشغيل)")
@@ -328,7 +330,7 @@ with tab_growth:
                 text_auto=".2s",
             )
             st.plotly_chart(
-                rtl_layout(by_platform, height=430), use_container_width=True
+                rtl_layout(by_platform, height=430)
             )
 
             with st.expander("📋 جدول المتابعين التفصيلي (آخر تشغيل)"):
@@ -343,7 +345,6 @@ with tab_growth:
                 )
                 st.dataframe(
                     table.sort_values("المتابعون", ascending=False),
-                    use_container_width=True,
                     hide_index=True,
                     column_config={
                         "الرابط": st.column_config.LinkColumn("الرابط", display_text="زيارة"),
@@ -358,7 +359,6 @@ with tab_growth:
                         failures[["الجهة", "المنصة", "handle", "error"]].rename(
                             columns={"handle": "المعرف", "error": "السبب"}
                         ),
-                        use_container_width=True,
                         hide_index=True,
                     )
 
@@ -397,7 +397,7 @@ with tab_sentiment:
                     showarrow=False,
                     font=dict(size=17),
                 )
-                st.plotly_chart(rtl_layout(donut, height=400), use_container_width=True)
+                st.plotly_chart(rtl_layout(donut, height=400))
 
             with right:
                 st.markdown("#### المشاعر حسب المنصة")
@@ -420,7 +420,7 @@ with tab_sentiment:
                     labels={"المنصة": ""},
                     text_auto=True,
                 )
-                st.plotly_chart(rtl_layout(bars, height=400), use_container_width=True)
+                st.plotly_chart(rtl_layout(bars, height=400))
 
             st.markdown("#### جميع التعليقات المحللة")
             label_filter = st.multiselect(
@@ -445,7 +445,6 @@ with tab_sentiment:
                     }
                 )
                 .sort_values("التاريخ", ascending=False),
-                use_container_width=True,
                 hide_index=True,
                 height=420,
                 column_config={
@@ -510,7 +509,6 @@ with tab_news:
                 }
             )
             .sort_values("تاريخ النشر", ascending=False),
-            use_container_width=True,
             hide_index=True,
             height=460,
             column_config={
@@ -542,7 +540,7 @@ with tab_news:
                     text_auto=True,
                     color_discrete_sequence=["#118a6e"],
                 )
-                st.plotly_chart(rtl_layout(fig, height=340), use_container_width=True)
+                st.plotly_chart(rtl_layout(fig, height=340))
 
         with g2:
             st.markdown("##### أكثر المصادر نشراً")
@@ -561,7 +559,7 @@ with tab_news:
                     text_auto=True,
                     color_discrete_sequence=["#0b5d4a"],
                 )
-                st.plotly_chart(rtl_layout(fig, height=340), use_container_width=True)
+                st.plotly_chart(rtl_layout(fig, height=340))
 
 
 # --------------------------- Negative review ------------------------------- #
@@ -595,7 +593,6 @@ with tab_review:
                 }
             )
             .sort_values("التاريخ", ascending=False),
-            use_container_width=True,
             hide_index=True,
             height=380,
             column_config={

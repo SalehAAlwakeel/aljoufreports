@@ -15,7 +15,7 @@ from rich.table import Table
 
 from .config import PROJECT_ROOT, load_config
 from .logging_setup import setup_logging
-from .models import SENTIMENT_AR
+from .models import SENTIMENT_AR, utcnow
 from .pipeline import Pipeline
 
 app = typer.Typer(
@@ -237,6 +237,130 @@ def send_email(
 
     recipients = mailer.send(summary, html_body)
     console.print(f"[green]Email sent to:[/green] {', '.join(recipients)}")
+
+
+@app.command("test-scrape")
+def test_scrape(
+    platform: str = typer.Option(
+        "instagram", help="Platform to probe: instagram, x, or youtube."
+    ),
+    entity: str = typer.Option("jsdo", help="Entity key from config/accounts.yaml."),
+    save: bool = typer.Option(False, "--save", help="Also store what was found."),
+    analyze: bool = typer.Option(
+        False, "--analyze", help="Run sentiment on the results (needs OPENAI_API_KEY)."
+    ),
+):
+    """Scrape comments for a single account, to validate credentials cheaply.
+
+    A full run starts many Apify actors. This touches one platform for one
+    account so you can confirm the token and actor work before spending
+    credits on everything.
+    """
+    from .collectors import ApifyRunner, CommentCollector
+
+    config = _boot()
+
+    if not config.secrets.apify_token:
+        console.print(
+            "[red]APIFY_TOKEN is not set.[/red]\n\n"
+            "1. Sign up at [bold]https://console.apify.com[/bold]\n"
+            "2. Copy your token from Settings -> Integrations\n"
+            "3. Put it in [bold].env[/bold] as [bold]APIFY_TOKEN=apify_api_...[/bold]"
+        )
+        raise typer.Exit(1)
+
+    target = config.accounts.by_key(entity)
+    if target is None:
+        available = ", ".join(e.key for e in config.accounts.entities)
+        console.print(f"[red]Unknown entity '{entity}'.[/red] Available: {available}")
+        raise typer.Exit(1)
+
+    account = target.account(platform)
+    if account is None:
+        have = ", ".join(target.platforms.keys()) or "none"
+        console.print(
+            f"[red]{target.name_en} has no {platform} account configured.[/red] "
+            f"It has: {have}"
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        f"[cyan]Probing[/cyan] {target.name_en} · {platform} · @{account.handle}\n"
+        f"[dim]{account.url}[/dim]\n"
+    )
+
+    runner = ApifyRunner(config.secrets.apify_token, config.settings.apify)
+    collector = CommentCollector(config, runner)
+    comments = collector._collect_for(target, account, platform)
+
+    if collector.errors:
+        console.print("[yellow]Problems reported by the collector:[/yellow]")
+        for error in collector.errors:
+            console.print(f"  • {error}")
+        console.print()
+
+    if not comments:
+        console.print(
+            "[yellow]No comments returned.[/yellow] Common causes:\n"
+            f"  • No posts in the last "
+            f"{config.settings.windows.comments_lookback_days} days "
+            f"(widen comments_lookback_days in config/settings.yaml)\n"
+            "  • The posts genuinely have no comments\n"
+            "  • The actor needs a paid Apify plan, or its ID changed\n"
+            f"    (current: {config.settings.apify.actors.get(f'{platform}_comments', 'n/a')})"
+        )
+        raise typer.Exit(0)
+
+    console.print(f"[green]Found {len(comments)} comment(s).[/green]\n")
+    table = Table(show_lines=True)
+    table.add_column("When", style="dim", no_wrap=True)
+    table.add_column("Author", style="cyan")
+    table.add_column("Comment")
+    for comment in comments[:10]:
+        when = (
+            comment.published_at.strftime("%Y-%m-%d %H:%M")
+            if comment.published_at
+            else "unknown"
+        )
+        table.add_row(when, comment.author or "—", comment.text[:160])
+    console.print(table)
+    if len(comments) > 10:
+        console.print(f"[dim]… and {len(comments) - 10} more[/dim]")
+
+    if save or analyze:
+        pipeline = Pipeline(config)
+        run_id = pipeline.db.start_run(utcnow()) if save else None
+        if run_id is not None:
+            pipeline.db.save_comments(run_id, comments)
+            pipeline.db.finish_run(run_id, utcnow(), "completed", notes="test-scrape")
+            console.print(f"\n[green]Saved to run {run_id}.[/green]")
+
+        if analyze:
+            if not config.secrets.openai_api_key:
+                console.print(
+                    "\n[yellow]Skipping sentiment: OPENAI_API_KEY is not set.[/yellow]"
+                )
+            else:
+                from .analysis import SentimentAnalyzer
+
+                payload = [
+                    {"comment_hash": c.comment_hash, "text": c.text} for c in comments
+                ]
+                results = SentimentAnalyzer(config).analyze(payload)
+                pipeline.db.save_sentiments(results)
+                console.print(f"\n[green]Analysed {len(results)} comment(s).[/green]")
+                stable = Table()
+                stable.add_column("Label")
+                stable.add_column("Reason (Arabic)")
+                stable.add_column("Comment")
+                by_hash = {c.comment_hash: c for c in comments}
+                for result in results[:10]:
+                    stable.add_row(
+                        result.label,
+                        result.reason_ar,
+                        (by_hash[result.comment_hash].text[:90]),
+                    )
+                console.print(stable)
 
 
 @app.command()

@@ -187,6 +187,21 @@ class Secrets(BaseModel):
         return bool(self.smtp_host and self.smtp_username and self.smtp_password)
 
 
+def _env_secret(name: str) -> str | None:
+    """Read a secret, treating an unedited .env.example placeholder as unset.
+
+    The template ships values like `apify_api_xxxxxxxx`. Returning those as
+    real credentials turns a configuration mistake into an opaque auth error.
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    lowered = raw.lower()
+    if "xxxx" in lowered or lowered.startswith(("your-", "your_", "<")):
+        return None
+    return raw
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw == "":
@@ -202,10 +217,10 @@ def _env_list(name: str) -> list[str]:
 def load_secrets() -> Secrets:
     load_dotenv(PROJECT_ROOT / ".env")
     return Secrets(
-        apify_token=os.getenv("APIFY_TOKEN") or None,
-        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        apify_token=_env_secret("APIFY_TOKEN"),
+        openai_api_key=_env_secret("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL") or "gpt-4o-mini",
-        google_sheets_id=os.getenv("GOOGLE_SHEETS_ID") or None,
+        google_sheets_id=_env_secret("GOOGLE_SHEETS_ID"),
         google_service_account_file=os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or None,
         google_service_account_json=os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or None,
         smtp_host=os.getenv("SMTP_HOST") or None,

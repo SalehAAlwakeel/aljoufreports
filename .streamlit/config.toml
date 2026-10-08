@@ -1,0 +1,16 @@
+# Pin a light theme: the dashboard's custom CSS (metric cards, comment cards,
+# chart backgrounds) is designed for light surfaces, and inheriting the
+# visitor's OS dark mode makes that text unreadable.
+[theme]
+base = "light"
+primaryColor = "#118a6e"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f8f7"
+textColor = "#263238"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

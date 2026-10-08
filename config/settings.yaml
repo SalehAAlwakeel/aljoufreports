@@ -1,0 +1,82 @@
+# Non-secret runtime configuration. Secrets live in .env (see .env.example).
+
+windows:
+  news_lookback_days: 14
+  comments_lookback_days: 7
+
+news:
+  # Google News RSS and GDELT are both keyless public endpoints, so news
+  # collection works before any paid credentials are configured.
+  sources: [google_news, gdelt]
+  max_per_keyword: 40
+  keywords:
+    - query: "Al Jouf"
+      label: Al Jouf
+      language: en
+    - query: "الجوف"
+      label: الجوف
+      language: ar
+    - query: "Sakaka"
+      label: Sakaka
+      language: en
+    - query: "سكاكا"
+      label: سكاكا
+      language: ar
+    - query: "Saudi Arabia"
+      label: Saudi Arabia
+      language: en
+    - query: "السعودية"
+      label: السعودية
+      language: ar
+
+followers:
+  # Which platforms to collect follower counts for.
+  platforms: [instagram, x, youtube, linkedin]
+
+comments:
+  # Comments are only collected for accounts we own; scraping competitor
+  # comment threads adds cost without feeding the sentiment review.
+  owned_only: true
+  max_posts_per_account: 10
+  max_comments_per_post: 50
+  platforms: [instagram, x, youtube]
+
+sentiment:
+  batch_size: 15
+  max_comment_chars: 1200
+  # Comments already scored are read from the local cache instead of being
+  # re-sent to the LLM, so re-runs are nearly free.
+  use_cache: true
+
+# Apify actor IDs. Every actor is swappable: if you prefer a different actor
+# from the Apify Store, change the ID here. The collectors normalise output by
+# searching for follower/subscriber-shaped fields rather than assuming one exact
+# schema, so most drop-in replacements work without code changes.
+apify:
+  timeout_secs: 900
+  memory_mbytes: 1024
+  actors:
+    instagram_profile: apify/instagram-profile-scraper
+    instagram_posts: apify/instagram-scraper
+    instagram_comments: apify/instagram-comment-scraper
+    x_profile: apidojo/twitter-user-scraper
+    x_tweets: apidojo/tweet-scraper
+    youtube_channel: streamers/youtube-scraper
+    youtube_comments: streamers/youtube-comments-scraper
+    linkedin_company: apimaestro/linkedin-company-detail
+
+email:
+  subject_prefix: "تقرير وسائل التواصل الأسبوعي | JSDO"
+  recipients:
+    - a.shuqair@jsdo.gov.sa
+    - exc.social@jsdo.gov.sa
+    - laith.louid@jo.ey.com
+  # Shown in the email body as the link to the live dashboard.
+  # Override with DASHBOARD_URL in .env.
+  dashboard_url: http://localhost:8501
+
+storage:
+  sqlite_path: data/aljouf.db
+  # Mirror every table into Google Sheets when GOOGLE_SHEETS_ID and a service
+  # account are configured. Harmless to leave enabled without credentials.
+  sheets_enabled: true

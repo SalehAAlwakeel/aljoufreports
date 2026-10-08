@@ -1,0 +1,77 @@
+name: Weekly social media report
+
+on:
+  schedule:
+    # Sundays 06:00 UTC = 09:00 Riyadh (AST, UTC+3). Sunday is the start of
+    # the Saudi work week.
+    - cron: "0 6 * * 0"
+    # The source brief also asks for the 1st and 15th at 09:00 Riyadh.
+    # Uncomment to add that cadence alongside the weekly run.
+    # - cron: "0 6 1,15 * *"
+  workflow_dispatch:
+    inputs:
+      skip_email:
+        description: "Skip sending the email"
+        type: boolean
+        default: false
+
+concurrency:
+  group: weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      # SQLite lives in the repo so follower history accumulates week over
+      # week. Swap this for cloud storage if you prefer not to commit data.
+      - name: Restore database
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: aljouf-db-${{ github.run_id }}
+          restore-keys: |
+            aljouf-db-
+
+      - name: Run pipeline
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
+          DASHBOARD_URL: ${{ vars.DASHBOARD_URL }}
+        run: |
+          python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}
+
+      - name: Upload logs and database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-artifacts
+          path: |
+            logs/
+            data/
+          retention-days: 30
+          if-no-files-found: ignore

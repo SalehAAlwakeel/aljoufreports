@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aljouf-report"
+version = "1.0.0"
+description = "Weekly social media reporting pipeline and dashboard for the Jouf Strategic Development Office"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[project.scripts]
+aljouf-report = "aljouf_report.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+aljouf_report = ["storage/*.sql"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

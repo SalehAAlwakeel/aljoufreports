@@ -1,0 +1,175 @@
+# Benchmarked entities for the Jouf Strategic Development Office (JSDO).
+# Source: "Benchmarked Entities.docx".
+#
+# `key`        stable identifier used as the primary key across SQLite / Sheets.
+# `owned`      true for our own accounts, false for benchmarked competitors.
+# `platforms`  per-platform handle + public profile URL. Omit a platform entirely
+#              when the entity has no account there (the document marks these "--").
+#
+# Handles are what the Apify actors receive; URLs are shown in the dashboard.
+
+entities:
+  - key: jsdo
+    name_ar: المكتب الاستراتيجي لتطوير منطقة الجوف
+    name_en: Jouf Strategic Development Office
+    owned: true
+    platforms:
+      linkedin:
+        handle: soj-gov-sa
+        url: https://www.linkedin.com/company/soj-gov-sa/
+      instagram:
+        handle: jouf_strategic_office
+        url: https://www.instagram.com/jouf_strategic_office
+      youtube:
+        handle: "@Jouf_Strategic_Office"
+        url: https://www.youtube.com/@Jouf_Strategic_Office
+      x:
+        handle: Jso_ksa
+        url: https://x.com/Jso_ksa
+
+  - key: makkah
+    name_ar: هيئة تطوير منطقة مكة المكرمة
+    name_en: Makkah Province Development Authority
+    owned: false
+    platforms:
+      linkedin:
+        handle: makkah-authority
+        url: https://www.linkedin.com/company/makkah-authority/
+      instagram:
+        handle: makkahauthority
+        url: https://www.instagram.com/makkahauthority
+      youtube:
+        handle: "@makkahauthority"
+        url: https://www.youtube.com/@makkahauthority
+      x:
+        handle: MakkahAuthority
+        url: https://x.com/MakkahAuthority
+
+  - key: madinah
+    name_ar: هيئة تطوير منطقة المدينة المنورة
+    name_en: Madinah Region Development Authority (MRDA)
+    owned: false
+    platforms:
+      linkedin:
+        handle: madinah-region-development-authority-mrda
+        url: https://www.linkedin.com/company/madinah-region-development-authority-mrda/
+      instagram:
+        handle: madinaauthority
+        url: https://www.instagram.com/madinaauthority
+      youtube:
+        handle: "@MadinaAuthority"
+        url: https://www.youtube.com/@MadinaAuthority
+      x:
+        handle: MadinaAuthority
+        url: https://x.com/MadinaAuthority
+
+  - key: sharqia
+    name_ar: هيئة تطوير المنطقة الشرقية
+    name_en: Sharqia Development Authority
+    owned: false
+    platforms:
+      linkedin:
+        handle: sharqia-development-authority
+        url: https://www.linkedin.com/company/sharqia-development-authority/
+      instagram:
+        handle: sda_sharqia0
+        url: https://www.instagram.com/sda_sharqia0
+      youtube:
+        handle: "@SDA_Sharqia"
+        url: https://www.youtube.com/@SDA_Sharqia
+      x:
+        handle: SDA_Sharqia
+        url: https://x.com/SDA_Sharqia
+
+  - key: aseer
+    name_ar: هيئة تطوير منطقة عسير
+    name_en: Aseer Development Authority (ASDA)
+    owned: false
+    platforms:
+      linkedin:
+        handle: asser-development-authority
+        url: https://www.linkedin.com/company/asser-development-authority/
+      instagram:
+        handle: asda_aseer
+        url: https://www.instagram.com/asda_aseer
+      youtube:
+        handle: "@Asda_aseer"
+        url: https://www.youtube.com/@Asda_aseer
+      x:
+        handle: asda_aseer
+        url: https://x.com/asda_aseer
+
+  - key: hail
+    name_ar: هيئة تطوير منطقة حائل
+    name_en: Hail Region Development Authority
+    owned: false
+    platforms:
+      linkedin:
+        handle: hrdahail
+        url: https://www.linkedin.com/company/hrdahail/
+      instagram:
+        handle: hrda_hail
+        url: https://www.instagram.com/hrda_hail
+      youtube:
+        handle: "@HRDA_HAIL"
+        url: https://www.youtube.com/@HRDA_HAIL
+      x:
+        handle: HRDA_HAIL
+        url: https://x.com/HRDA_HAIL
+
+  - key: alahsa
+    name_ar: هيئة تطوير الأحساء
+    name_en: AlAhsa Development Authority (AHDA)
+    owned: false
+    platforms:
+      linkedin:
+        handle: alahsa-development-authority
+        url: https://www.linkedin.com/company/alahsa-development-authority/
+      instagram:
+        handle: ahda_alahsa
+        url: https://www.instagram.com/ahda_alahsa
+      x:
+        handle: ahda_alahsa
+        url: https://x.com/ahda_alahsa
+
+  - key: albaha
+    name_ar: المكتب الاستراتيجي لتطوير منطقة الباحة
+    name_en: Al Baha Strategic Development Office
+    owned: false
+    platforms:
+      linkedin:
+        handle: albaha-strategic-office
+        url: https://www.linkedin.com/company/albaha-strategic-office/
+      x:
+        handle: BSO_Albaha
+        url: https://x.com/BSO_Albaha
+
+  - key: jazan
+    name_ar: المكتب الاستراتيجي لتطوير منطقة جازان
+    name_en: Jazan Region Development Strategic Office
+    owned: false
+    platforms:
+      linkedin:
+        handle: jazansdo
+        url: https://www.linkedin.com/company/jazansdo/
+      youtube:
+        handle: "@JazanStrategicOffice"
+        url: https://www.youtube.com/@JazanStrategicOffice
+      x:
+        handle: JazanSDO
+        url: https://x.com/JazanSDO
+
+  - key: nbso
+    name_ar: المكتب الاستراتيجي لتطوير منطقة الحدود الشمالية
+    name_en: Northern Borders Strategic Development Office
+    owned: false
+    platforms:
+      linkedin:
+        handle: nbso-sa
+        url: https://www.linkedin.com/company/nbso-sa/
+      instagram:
+        handle: nbso_sa
+        url: https://www.instagram.com/nbso_sa
+      x:
+        handle: NBSO_sa
+        url: https://x.com/NBSO_sa

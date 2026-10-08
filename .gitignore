@@ -1,0 +1,15 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+data/
+logs/
+secrets/
+
+# Scratch output from tools/read_docx.py
+docx_dump.json
+docx_dump.txt

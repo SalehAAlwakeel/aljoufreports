@@ -55,6 +55,9 @@ sentiment:
 apify:
   timeout_secs: 900
   memory_mbytes: 1024
+  # Per-run spend ceiling in USD; the run is aborted before exceeding it.
+  # Set to 0 to disable the cap.
+  max_charge_usd: 0.50
   actors:
     instagram_profile: apify/instagram-profile-scraper
     instagram_posts: apify/instagram-scraper

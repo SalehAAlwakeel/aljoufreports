@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from aljouf_report.analysis.sentiment import SentimentAnalyzer
+from aljouf_report.analysis.sentiment import (
+    SentimentAnalyzer,
+    SentimentBatchError,
+    SentimentFatalError,
+)
 from aljouf_report.config import load_config
 
 
@@ -26,6 +30,68 @@ def _fake_response(payload: dict):
             )
         ]
     )
+
+
+def _raising_client(exc: Exception, counter: list[int]):
+    def create(**_):
+        counter.append(1)
+        raise exc
+
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+
+def test_billing_failure_is_not_retried(analyzer, monkeypatch):
+    """An exhausted balance must fail on the first attempt, not after backoff."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        analyzer,
+        "_get_client",
+        lambda: _raising_client(
+            RuntimeError(
+                "Error code: 429 - {'error': {'message': 'You have no credits "
+                "remaining.', 'code': 'credit_balance_exhausted'}}"
+            ),
+            calls,
+        ),
+    )
+
+    with pytest.raises(SentimentFatalError):
+        analyzer._analyze_batch([{"id": "h1", "text": "نص"}])
+    assert len(calls) == 1
+
+
+def test_transient_failure_is_retried(analyzer, monkeypatch):
+    calls: list[int] = []
+    monkeypatch.setattr(
+        analyzer,
+        "_get_client",
+        lambda: _raising_client(RuntimeError("Error code: 503 - overloaded"), calls),
+    )
+
+    with pytest.raises(SentimentBatchError):
+        analyzer._analyze_batch([{"id": "h1", "text": "نص"}])
+    assert len(calls) == 3
+
+
+def test_fatal_error_stops_remaining_batches(analyzer, monkeypatch):
+    """One billing error should abort the run, not repeat per batch."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        analyzer,
+        "_get_client",
+        lambda: _raising_client(
+            RuntimeError("insufficient_quota: add credits"), calls
+        ),
+    )
+    monkeypatch.setattr(analyzer.config.settings.sentiment, "batch_size", 1)
+
+    comments = [{"comment_hash": f"h{i}", "text": "نص"} for i in range(5)]
+    assert analyzer.analyze(comments) == []
+    # Only the first batch was attempted, with no retries.
+    assert len(calls) == 1
+    assert len(analyzer.errors) == 1
 
 
 def test_batch_results_map_back_to_comment_hashes(analyzer, monkeypatch):

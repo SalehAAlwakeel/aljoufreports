@@ -32,7 +32,28 @@ class SentimentNotConfigured(RuntimeError):
 
 
 class SentimentBatchError(RuntimeError):
-    pass
+    """Transient failure; worth retrying."""
+
+
+class SentimentFatalError(RuntimeError):
+    """Permanent failure. Retrying cannot help, so stop immediately."""
+
+
+# Billing and auth failures arrive as 429/401 and look retryable, but no amount
+# of backoff fixes an empty balance or a revoked key. Matching on the API's
+# error codes lets a misconfigured account fail in a second instead of a minute.
+FATAL_MARKERS = (
+    "insufficient_quota",
+    "credit_balance_exhausted",
+    "billing_not_active",
+    "invalid_api_key",
+    "account_deactivated",
+)
+
+
+def _is_fatal(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in FATAL_MARKERS)
 
 
 def _chunks(items: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
@@ -64,7 +85,11 @@ class SentimentAnalyzer:
             raise SentimentNotConfigured(
                 "openai is not installed. Run: pip install -r requirements.txt"
             ) from exc
-        self._client = OpenAI(api_key=self.config.secrets.openai_api_key)
+        # Retries are owned by tenacity on _analyze_batch. Leaving the SDK's
+        # own retries enabled multiplies the two (3 x 3 attempts).
+        self._client = OpenAI(
+            api_key=self.config.secrets.openai_api_key, max_retries=0
+        )
         return self._client
 
     # -- public API ------------------------------------------------------- #
@@ -98,6 +123,13 @@ class SentimentAnalyzer:
             try:
                 results.extend(self._analyze_batch(payload))
                 log.info("  batch %d/%d done", index, len(batches))
+            except SentimentFatalError as exc:
+                # Credentials or billing are broken; every later batch would
+                # fail identically. Record once and stop.
+                msg = f"sentiment: aborted at batch {index}/{len(batches)}: {exc}"
+                log.error(msg)
+                self.errors.append(msg)
+                break
             except Exception as exc:  # noqa: BLE001 - one bad batch must not abort
                 msg = f"sentiment: batch {index}/{len(batches)} failed: {exc}"
                 log.warning(msg)
@@ -135,7 +167,10 @@ class SentimentAnalyzer:
                 },
             )
         except Exception as exc:
-            raise SentimentBatchError(str(exc)) from exc
+            message = str(exc)
+            if _is_fatal(message):
+                raise SentimentFatalError(message) from exc
+            raise SentimentBatchError(message) from exc
 
         content = (response.choices[0].message.content or "").strip()
         if not content:

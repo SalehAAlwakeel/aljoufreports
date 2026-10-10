@@ -7,7 +7,10 @@ admin login.
 
 from __future__ import annotations
 
+import inspect
 import logging
+from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from tenacity import (
@@ -22,6 +25,23 @@ from ..config import ApifySettings
 log = logging.getLogger(__name__)
 
 
+def _field(run: Any, snake: str, camel: str) -> Any:
+    """Read a run field across apify-client generations.
+
+    apify-client <3 returned plain dicts with camelCase keys; 3.x returns a
+    typed model with snake_case attributes. Supporting both keeps the pipeline
+    working when the dependency is upgraded or pinned differently.
+    """
+    if run is None:
+        return None
+    value = getattr(run, snake, None)
+    if value is not None:
+        return value
+    if isinstance(run, dict):
+        return run.get(camel) or run.get(snake)
+    return None
+
+
 class ApifyNotConfigured(RuntimeError):
     pass
 
@@ -34,6 +54,7 @@ class ApifyRunner:
     def __init__(self, token: str | None, settings: ApifySettings):
         self.token = token
         self.settings = settings
+        self.total_cost_usd = 0.0
         self._client: Any | None = None
 
     @property
@@ -57,6 +78,28 @@ class ApifyRunner:
         self._client = ApifyClient(self.token)
         return self._client
 
+    def _call(self, client: Any, actor_id: str, run_input: dict[str, Any]) -> Any:
+        """Invoke an actor, adapting to the installed client's signature."""
+        actor = client.actor(actor_id)
+        params = inspect.signature(actor.call).parameters
+
+        kwargs: dict[str, Any] = {"run_input": run_input}
+        if "memory_mbytes" in params:
+            kwargs["memory_mbytes"] = self.settings.memory_mbytes
+
+        # The run time limit was renamed between client generations.
+        if "run_timeout" in params:
+            kwargs["run_timeout"] = timedelta(seconds=self.settings.timeout_secs)
+        elif "timeout_secs" in params:
+            kwargs["timeout_secs"] = self.settings.timeout_secs
+
+        # Hard spend ceiling per actor run, so a misconfigured input cannot
+        # drain an Apify balance.
+        if self.settings.max_charge_usd and "max_total_charge_usd" in params:
+            kwargs["max_total_charge_usd"] = Decimal(str(self.settings.max_charge_usd))
+
+        return actor.call(**kwargs)
+
     @retry(
         retry=retry_if_exception_type(ApifyRunError),
         stop=stop_after_attempt(3),
@@ -68,28 +111,34 @@ class ApifyRunner:
         client = self._get_client()
         log.info("Apify: running actor %s", actor_id)
         try:
-            run = client.actor(actor_id).call(
-                run_input=run_input,
-                timeout_secs=self.settings.timeout_secs,
-                memory_mbytes=self.settings.memory_mbytes,
-            )
+            run = self._call(client, actor_id, run_input)
         except Exception as exc:
             raise ApifyRunError(f"Actor {actor_id} failed to start: {exc}") from exc
 
         if not run:
             raise ApifyRunError(f"Actor {actor_id} returned no run metadata.")
 
-        status = run.get("status")
+        status = _field(run, "status", "status")
+        status = getattr(status, "value", status)
         if status != "SUCCEEDED":
             # A TIMED-OUT run often still has partial results worth keeping.
             log.warning("Apify: actor %s finished with status %s", actor_id, status)
 
-        dataset_id = run.get("defaultDatasetId")
+        dataset_id = _field(run, "default_dataset_id", "defaultDatasetId")
         if not dataset_id:
             raise ApifyRunError(f"Actor {actor_id} produced no dataset.")
 
         items = list(client.dataset(dataset_id).iterate_items())
-        log.info("Apify: actor %s returned %d items", actor_id, len(items))
+
+        cost = _field(run, "usage_total_usd", "usageTotalUsd")
+        self.total_cost_usd += float(cost or 0)
+        log.info(
+            "Apify: actor %s returned %d items (cost $%.4f, session total $%.4f)",
+            actor_id,
+            len(items),
+            float(cost or 0),
+            self.total_cost_usd,
+        )
         return items
 
     def run_safe(

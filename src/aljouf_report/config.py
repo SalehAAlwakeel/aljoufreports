@@ -107,6 +107,8 @@ class SentimentSettings(BaseModel):
 class ApifySettings(BaseModel):
     timeout_secs: int = 900
     memory_mbytes: int = 1024
+    # Hard per-run spend ceiling in USD. Set to 0 to disable.
+    max_charge_usd: float = 0.50
     actors: dict[str, str] = Field(default_factory=dict)
 
     def actor(self, name: str) -> str:

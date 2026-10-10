@@ -25,10 +25,13 @@ log = logging.getLogger(__name__)
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-# GDELT throttles anonymous clients to roughly one query every five seconds and
-# answers 429 beyond that. Pace requests rather than burning retries.
-GDELT_MIN_INTERVAL_SECS = 5.5
-GDELT_MAX_ATTEMPTS = 3
+# GDELT throttles anonymous clients and answers 429 beyond that. Pace requests
+# rather than burning retries. The documented limit is one query per five
+# seconds, but in practice that still gets throttled on about half the keywords,
+# so pace well clear of it: a handful of extra seconds is free next to an
+# eleven-minute run, and GDELT is the only source that finds non-headline items.
+GDELT_MIN_INTERVAL_SECS = 10.0
+GDELT_MAX_ATTEMPTS = 4
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

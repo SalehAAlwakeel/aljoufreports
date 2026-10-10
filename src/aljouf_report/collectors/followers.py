@@ -98,15 +98,20 @@ SPECS: dict[str, PlatformSpec] = {
     ),
     "linkedin": PlatformSpec(
         actor_key="linkedin_company",
-        # This actor takes one company per run, so the caller fans out.
-        build_input=lambda handles, urls: {"identifier": handles[0]},
+        build_input=lambda handles, urls: {"identifier": list(handles)},
         follower_paths=(
+            "stats.follower_count",
             "follower_count",
             "followerCount",
             "followersCount",
             "data.follower_count",
         ),
         identity_paths=(
+            # The actor echoes the requested handle here, which is the most
+            # reliable way to match a result back to the account we asked for.
+            "input_identifier",
+            "basic_info.universal_name",
+            "basic_info.linkedin_url",
             "universal_name",
             "universalName",
             "public_identifier",
@@ -116,8 +121,8 @@ SPECS: dict[str, PlatformSpec] = {
     ),
 }
 
-# Actors that accept only a single target per run.
-SINGLE_TARGET_PLATFORMS = {"linkedin"}
+# Actors that accept only a single target per run, so the caller must fan out.
+SINGLE_TARGET_PLATFORMS: set[str] = set()
 
 
 class FollowerCollector:

@@ -7,6 +7,7 @@ import pytest
 from aljouf_report.collectors.extract import (
     extract_followers,
     find_follower_count,
+    first_value,
     parse_count,
     parse_datetime,
 )
@@ -91,3 +92,27 @@ def test_parse_datetime_normalises_to_utc():
 def test_parse_datetime_rejects_garbage():
     assert parse_datetime("not a date") is None
     assert parse_datetime(None) is None
+
+
+def test_linkedin_company_detail_shape():
+    """Real shape of apimaestro/linkedin-company-detail output.
+
+    Followers are nested under stats and the requested handle is echoed back
+    as input_identifier; neither is guessable from the other actors' schemas.
+    """
+    item = {
+        "input_identifier": "soj-gov-sa",
+        "basic_info": {
+            "universal_name": "soj-gov-sa",
+            "linkedin_url": "https://www.linkedin.com/company/soj-gov-sa/",
+        },
+        "stats": {"employee_count": 32, "follower_count": 6101},
+    }
+    assert extract_followers(item, ("stats.follower_count",)) == 6101
+    assert first_value(item, ("input_identifier",)) == "soj-gov-sa"
+
+
+def test_employee_count_is_not_mistaken_for_followers():
+    """employee_count sits beside ollower_count and must not win."""
+    item = {"stats": {"employee_count": 32, "follower_count": 6101}}
+    assert extract_followers(item) == 6101

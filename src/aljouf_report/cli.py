@@ -106,6 +106,54 @@ def seed_demo(
     )
 
 
+@app.command("analyze")
+def analyze(
+    days: int = typer.Option(
+        0, help="Comment window in days. 0 uses comments_lookback_days from settings."
+    ),
+    all_time: bool = typer.Option(
+        False, "--all", help="Score every unscored comment, ignoring the window."
+    ),
+):
+    """Score stored comments that have no sentiment yet, without re-scraping.
+
+    Useful after fixing an OpenAI credential or billing problem: collection is
+    the slow and metered half of the pipeline, and its results are already in
+    the database.
+    """
+    from .analysis.sentiment import SentimentAnalyzer
+    from .storage.database import Database
+
+    config = _boot()
+    db = Database(config.db_path)
+
+    window = 36500 if all_time else (days or config.settings.windows.comments_lookback_days)
+    pending = db.comments_needing_sentiment(window)
+    if not pending:
+        console.print(
+            "[green]Nothing to analyse.[/green] Every comment in the window is "
+            "already scored."
+        )
+        return
+
+    analyzer = SentimentAnalyzer(config)
+    if not analyzer.available:
+        console.print("[red]OPENAI_API_KEY is not set.[/red] Add it to .env first.")
+        raise typer.Exit(1)
+
+    console.print(f"Scoring {len(pending)} comment(s)…")
+    saved = db.save_sentiments(analyzer.analyze(pending))
+
+    if analyzer.errors:
+        for err in analyzer.errors:
+            console.print(f"[red]•[/red] {err}")
+    console.print(f"[green]Scored and stored {saved} comment(s).[/green]")
+
+    counts = db.sentiment_counts(window)
+    for label, n in sorted(counts.items()):
+        console.print(f"  {label:9} {n}")
+
+
 def _port_is_free(host: str, port: int) -> bool:
     import socket
 

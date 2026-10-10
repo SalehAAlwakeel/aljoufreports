@@ -167,7 +167,20 @@ python -m aljouf_report init-db        # create the schema only
 python -m aljouf_report seed-demo      # synthetic data, no keys needed
 python -m aljouf_report dashboard      # launch Streamlit
 python -m aljouf_report send-email     # re-send or --preview the last run
+python -m aljouf_report test-scrape    # probe one account cheaply
+python -m aljouf_report analyze        # score stored comments, no re-scraping
 ```
+
+Two commands exist because collection is the slow, metered half of the pipeline
+and scoring is the cheap half:
+
+- `test-scrape --platform {instagram|x|youtube} [--entity KEY] [--save] [--analyze]`
+  runs the collector for a single account and prints what came back. Use it to
+  validate credentials or a swapped actor ID for a few cents instead of
+  committing to a full run.
+- `analyze [--days N] [--all]` scores comments already in the database that have
+  no sentiment yet. Run it after fixing an OpenAI key or adding credits; the
+  scraped comments are reused rather than re-fetched.
 
 `run` accepts `--skip-followers`, `--skip-news`, `--skip-comments`,
 `--skip-sentiment`, `--skip-sheets`, and `--skip-email`, which is useful for

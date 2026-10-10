@@ -217,7 +217,9 @@ class NewsCollector:
                     title=title,
                     url=link,
                     published_at=published,
-                    source=entry.get("sourcecountry") or _domain(link),
+                    # `sourcecountry` is the publisher's country, not its name;
+                    # using it here labelled articles "India" or "Zimbabwe".
+                    source=entry.get("domain") or _domain(link),
                     domain=entry.get("domain") or _domain(link),
                     keyword=keyword.label,
                     language=_language_code(entry.get("language"), keyword.language),

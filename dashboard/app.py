@@ -366,9 +366,16 @@ with tab_growth:
                     },
                 )
 
-            failures = followers_f[followers_f["followers"].isna()]
+            # Scope to the newest run: a failure that has since been fixed must
+            # not keep reporting the collector as broken.
+            newest_run = followers_f["run_id"].max()
+            failures = followers_f[
+                (followers_f["run_id"] == newest_run) & followers_f["followers"].isna()
+            ]
             if not failures.empty:
-                with st.expander(f"⚠️ حسابات لم يتم جمع بياناتها ({len(failures)})"):
+                with st.expander(
+                    f"⚠️ حسابات لم يتم جمع بياناتها في آخر تشغيل ({len(failures)})"
+                ):
                     st.dataframe(
                         failures[["الجهة", "المنصة", "handle", "error"]].rename(
                             columns={"handle": "المعرف", "error": "السبب"}

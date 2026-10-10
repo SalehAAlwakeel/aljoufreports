@@ -381,6 +381,34 @@ already covers the same keywords. To skip GDELT entirely, remove it from
 "حسابات لم يتم جمع بياناتها" panel — an actor may have been renamed or may need
 a paid Apify plan. Actor IDs are swappable in `config/settings.yaml`.
 
+**Sentiment is skipped with `credit_balance_exhausted`.** The API key is valid
+but the OpenAI account has no balance; add credits under
+[billing](https://platform.openai.com/settings/organization/billing). Scoring a
+week of comments costs well under a cent with `gpt-4o-mini`. The pipeline treats
+this as a permanent error and stops after the first batch rather than retrying,
+so the rest of the run still completes and the comments are stored unscored.
+Re-running after adding credits scores them without re-scraping, because
+sentiment is cached per comment and collection upserts by `comment_hash`.
+
+**`test-scrape` returns zero comments.** Usually the account genuinely has none
+in the window rather than a broken actor. Confirm it before changing actor IDs:
+`python tools/inspect_runs.py` lists recent runs and
+`python tools/inspect_runs.py <runId>` prints each post's `commentsCount`
+straight from the platform. If those are all `0`, the scraper worked and the
+posts are simply quiet. Instagram and YouTube engagement on these accounts is
+near zero; X replies are where the real comment volume is.
+
+**An actor fails with `Input is not valid: Field ... must be <type>`.** The
+actor changed its input schema. Fix the `build_input` lambda for that platform
+in `src/aljouf_report/collectors/followers.py`; if the field became an array,
+also drop the platform from `SINGLE_TARGET_PLATFORMS` so all handles go through
+in one (cheaper) run.
+
+**Apify spend.** Every actor run is capped by `apify.max_charge_usd` in
+`config/settings.yaml` (default `$0.50`, set `0` to disable). Cumulative cost
+per run is logged, and a full collection across all four platforms costs
+roughly `$0.08`.
+
 **Sheets sync is silently skipped.** It needs both `GOOGLE_SHEETS_ID` and
 resolvable credentials, and the spreadsheet must be shared with the service
 account's `client_email` as Editor.

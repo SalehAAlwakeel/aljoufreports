@@ -43,7 +43,7 @@ comments:
   # post fetch is truncated before reaching the start of it.
   max_posts_per_account: 30
   max_comments_per_post: 50
-  platforms: [instagram, x, youtube]
+  platforms: [instagram, x, youtube, linkedin]
 
 sentiment:
   batch_size: 15
@@ -71,6 +71,8 @@ apify:
     youtube_channel: streamers/youtube-scraper
     youtube_comments: streamers/youtube-comments-scraper
     linkedin_company: apimaestro/linkedin-company-detail
+    linkedin_posts: apimaestro/linkedin-company-posts
+    linkedin_comments: apimaestro/linkedin-post-comments-replies-engagements-scraper-no-cookies
 
 email:
   subject_prefix: "تقرير وسائل التواصل الأسبوعي | JSDO"
@@ -81,6 +83,12 @@ email:
   # Shown in the email body as the link to the live dashboard.
   # Override with DASHBOARD_URL in .env.
   dashboard_url: http://localhost:8501
+
+dashboard:
+  # The dashboard reloads itself on this interval so an unattended screen stays
+  # current. This only re-reads the local database -- it never triggers
+  # scraping, so it costs nothing. Set to 0 to disable.
+  auto_refresh_minutes: 30
 
 storage:
   sqlite_path: data/aljouf.db

@@ -55,10 +55,24 @@ Warnings appear in the CLI output, the weekly email, and `logs/pipeline.log`.
 |---|---|---|---|
 | Follower counts | Apify actors (public profiles) | `APIFY_TOKEN` | current snapshot |
 | News & trends | Google News RSS + GDELT 2.0 | no | 14 days |
-| Comments | Apify actors (public posts/replies) | `APIFY_TOKEN` | 7 days |
-| Sentiment | OpenAI | `OPENAI_API_KEY` | 7 days |
+| Comments | Apify actors (public posts/replies) | `APIFY_TOKEN` | 90 days |
+| Sentiment | OpenAI | `OPENAI_API_KEY` | 90 days |
 
 Windows, keywords, and platform lists are all set in `config/settings.yaml`.
+
+Comments come from four platforms, each needing a different approach because
+only LinkedIn and Instagram expose a conventional comment thread:
+
+| Platform | How comments are reached |
+|---|---|
+| LinkedIn | Company posts, then comment threads on posts whose reported comment count is above zero. Nested replies are lifted to top level so each is scored. |
+| Instagram | Recent posts, then comment threads on those posts. |
+| YouTube | Recent channel videos, then comments on those videos. |
+| X | A `to:handle` reply search. Replies are the public equivalent of a comment thread and need no account access. |
+
+The comment window defaults to 90 days rather than a week: these accounts post
+often but attract few comments, so a 7-day window routinely returned nothing
+outside X and LinkedIn.
 
 ### Tracked accounts
 
@@ -202,6 +216,15 @@ history to generate (default 8, which gives the growth chart something to show).
 python -m aljouf_report dashboard --port 8501
 # or: streamlit run dashboard/app.py
 ```
+
+A KPI row shows the owned-account total, news volume, scored comment count and
+positivity share, followed by a per-platform breakdown of our own follower
+counts with week-over-week deltas.
+
+The page reloads itself every `dashboard.auto_refresh_minutes` (default 30,
+`0` disables) so an unattended screen stays current. This only re-reads the
+local database — **it never triggers scraping and costs nothing.** Data
+collection stays on its own schedule; see [Scheduling](#scheduling).
 
 Four tabs, all right-to-left:
 

@@ -196,9 +196,17 @@ def first_datetime(data: Any, paths: Iterable[str]) -> datetime | None:
 
 
 def first_text(data: Any, paths: Sequence[str], default: str = "") -> str:
-    value = first_value(data, paths)
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return default
-    return str(value).strip()
+    """First path yielding usable text.
+
+    Containers are skipped rather than treated as a miss. Actors often expose
+    both `author` (an object) and `author.name`; stopping at the object would
+    discard the name just because a broader path was listed first.
+    """
+    for path in paths:
+        value = dig(data, path)
+        if value in (None, "", [], {}) or isinstance(value, (dict, list)):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return default

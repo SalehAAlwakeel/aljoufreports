@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Allow `streamlit run dashboard/app.py` without installing the package, and
 # from any working directory.
@@ -36,6 +37,28 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 apply_rtl()
+
+
+def auto_refresh(minutes: int) -> None:
+    """Reload the whole page on a timer so a wall-mounted screen stays current.
+
+    The data cache expires well inside this interval, so the reload picks up
+    whatever the last pipeline run wrote. Done with a timer in an iframe rather
+    than a blocking loop so the page stays interactive, and it targets
+    `window.parent` because Streamlit renders components in an iframe.
+    """
+    if minutes <= 0:
+        return
+    components.html(
+        f"""
+        <script>
+          setTimeout(function () {{
+            window.parent.location.reload();
+          }}, {minutes * 60 * 1000});
+        </script>
+        """,
+        height=0,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -144,6 +167,11 @@ with st.sidebar:
     st.caption(f"قاعدة البيانات: `{config.db_path.name}`")
     st.caption(f"نافذة الأخبار: {config.settings.windows.news_lookback_days} يوماً")
     st.caption(f"نافذة التعليقات: {config.settings.windows.comments_lookback_days} أيام")
+    refresh_minutes = config.settings.dashboard.auto_refresh_minutes
+    if refresh_minutes > 0:
+        st.caption(f"تحديث تلقائي: كل {refresh_minutes} دقيقة")
+
+auto_refresh(config.settings.dashboard.auto_refresh_minutes)
 
 
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
@@ -206,6 +234,29 @@ def owned_totals(df: pd.DataFrame) -> tuple[int | None, int | None]:
     return latest, previous
 
 
+def owned_by_platform(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-platform follower counts for our accounts: latest run vs previous."""
+    if df.empty:
+        return pd.DataFrame()
+    owned = df[df["owned"] & df["followers"].notna()]
+    if owned.empty:
+        return pd.DataFrame()
+    runs = sorted(owned["run_id"].unique())
+    out = (
+        owned[owned["run_id"] == runs[-1]]
+        .groupby("المنصة")["followers"]
+        .sum()
+        .rename("now")
+        .to_frame()
+    )
+    out["before"] = (
+        owned[owned["run_id"] == runs[-2]].groupby("المنصة")["followers"].sum()
+        if len(runs) >= 2
+        else pd.NA
+    )
+    return out.sort_values("now", ascending=False)
+
+
 total_now, total_before = owned_totals(followers_f)
 sentiment_counts = (
     comments_f["label"].value_counts().to_dict() if not comments_f.empty else {}
@@ -238,6 +289,18 @@ with col4:
         delta=f"{negative_count} تعليق سلبي" if negative_count else "لا سلبيات",
         delta_color="inverse" if negative_count else "normal",
     )
+
+by_platform = owned_by_platform(followers_f)
+if not by_platform.empty:
+    st.markdown("##### متابعو حساباتنا حسب المنصة")
+    for column, (platform, row) in zip(
+        st.columns(len(by_platform)), by_platform.iterrows()
+    ):
+        delta = None
+        if pd.notna(row["before"]):
+            diff = int(row["now"]) - int(row["before"])
+            delta = f"{diff:+,}" if diff else "بدون تغيير"
+        column.metric(str(platform), f"{int(row['now']):,}", delta=delta)
 
 st.divider()
 

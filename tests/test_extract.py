@@ -7,6 +7,7 @@ import pytest
 from aljouf_report.collectors.extract import (
     extract_followers,
     find_follower_count,
+    first_text,
     first_value,
     parse_count,
     parse_datetime,
@@ -116,3 +117,16 @@ def test_employee_count_is_not_mistaken_for_followers():
     """employee_count sits beside ollower_count and must not win."""
     item = {"stats": {"employee_count": 32, "follower_count": 6101}}
     assert extract_followers(item) == 6101
+
+
+def test_first_text_skips_containers_and_keeps_looking():
+    """A broad path that resolves to an object must not mask a later one.
+
+    Comment actors commonly expose both uthor (object) and uthor.name.
+    """
+    item = {"author": {"name": "Fahad"}}
+    assert first_text(item, ("author", "author.name")) == "Fahad"
+
+
+def test_first_text_falls_back_to_default():
+    assert first_text({"author": {}}, ("author", "author.name"), "-") == "-"

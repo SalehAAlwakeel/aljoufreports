@@ -33,6 +33,10 @@ AUTHOR_PATHS = (
     "author.name",
 )
 DATE_PATHS = (
+    # Epoch milliseconds first: LinkedIn's sibling `posted_at.date` is a naive
+    # local-looking string, while the timestamp is unambiguous.
+    "posted_at.timestamp",
+    "posted_at.date",
     "timestamp",
     "createdAt",
     "created_at",
@@ -42,8 +46,23 @@ DATE_PATHS = (
     "time",
 )
 ID_PATHS = ("id", "commentId", "cid", "comment_id", "url")
-LIKE_PATHS = ("likesCount", "likeCount", "voteCount", "likes", "favorite_count")
-POST_URL_PATHS = ("postUrl", "post.url", "videoUrl", "url", "inputUrl", "pageUrl")
+LIKE_PATHS = (
+    "likesCount",
+    "likeCount",
+    "voteCount",
+    "likes",
+    "favorite_count",
+    "stats.total_reactions",
+)
+POST_URL_PATHS = (
+    "postUrl",
+    "post.url",
+    "videoUrl",
+    "url",
+    "inputUrl",
+    "pageUrl",
+    "comment_url",
+)
 
 
 class CommentCollector:
@@ -94,8 +113,79 @@ class CommentCollector:
             return self._x(entity, account)
         if platform == "youtube":
             return self._youtube(entity, account)
+        if platform == "linkedin":
+            return self._linkedin(entity, account)
         log.warning("No comment collector for platform '%s'.", platform)
         return []
+
+    # -- LinkedIn: company posts, then comments on the ones that have any -- #
+    def _linkedin(self, entity: Entity, account: PlatformAccount) -> list[SocialComment]:
+        cfg = self.config.settings.comments
+        actors = self.config.settings.apify
+
+        post_items, error = self.runner.run_safe(
+            actors.actor("linkedin_posts"),
+            {
+                "company_name": account.handle,
+                "limit": cfg.max_posts_per_account,
+                "sort": "recent",
+            },
+        )
+        if error:
+            self.errors.append(f"comments:{entity.key}/linkedin posts: {error}")
+            return []
+
+        # The posts payload reports a comment count, so posts without comments
+        # can be skipped entirely instead of paid for and discovered empty.
+        cutoff = self._cutoff
+        post_ids: list[str] = []
+        for item in post_items:
+            if not isinstance(item, dict):
+                continue
+            published = first_datetime(item, DATE_PATHS)
+            if published and published < cutoff:
+                continue
+            if not parse_count((item.get("stats") or {}).get("comments")):
+                continue
+            post_id = first_text(item, ("activity_urn", "full_urn", "post_url"))
+            if post_id:
+                post_ids.append(post_id)
+
+        if not post_ids:
+            return []
+
+        comment_items, error = self.runner.run_safe(
+            actors.actor("linkedin_comments"),
+            {
+                "postIds": post_ids[: cfg.max_posts_per_account],
+                "limit": cfg.max_comments_per_post,
+                "sortOrder": "most recent",
+            },
+        )
+        if error:
+            self.errors.append(f"comments:{entity.key}/linkedin comments: {error}")
+            return []
+
+        return self._to_comments(
+            self._flatten_linkedin(comment_items), entity, "linkedin"
+        )
+
+    @staticmethod
+    def _flatten_linkedin(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Lift nested replies to top level so each one gets scored too.
+
+        A reply to a comment is public feedback like any other, and the actor
+        returns them nested under their parent rather than as separate items.
+        """
+        flat: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            flat.append(item)
+            for reply in item.get("replies") or []:
+                if isinstance(reply, dict):
+                    flat.append(reply)
+        return flat
 
     # -- Instagram: posts, then comments on those posts ------------------- #
     def _instagram(self, entity: Entity, account: PlatformAccount) -> list[SocialComment]:

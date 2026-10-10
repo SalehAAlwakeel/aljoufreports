@@ -127,6 +127,12 @@ class EmailSettings(BaseModel):
     dashboard_url: str = "http://localhost:8501"
 
 
+class DashboardSettings(BaseModel):
+    # Reload the page on this interval so an unattended screen stays current.
+    # 0 disables it. This only re-reads the database; it does not scrape.
+    auto_refresh_minutes: int = 30
+
+
 class StorageSettings(BaseModel):
     sqlite_path: str = "data/aljouf.db"
     sheets_enabled: bool = True
@@ -141,6 +147,7 @@ class Settings(BaseModel):
     apify: ApifySettings = Field(default_factory=ApifySettings)
     email: EmailSettings = Field(default_factory=EmailSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
 
 
 # --------------------------------------------------------------------------- #

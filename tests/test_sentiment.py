@@ -191,10 +191,13 @@ def test_missing_reason_gets_a_placeholder(analyzer):
 
 
 def test_analyze_returns_empty_without_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     load_config.cache_clear()
     config = load_config()
     load_config.cache_clear()
+    # Cleared on the config rather than the environment: load_config reads .env,
+    # so deleting the variable would still pick up a real local key and make the
+    # test depend on whether the developer has configured credentials.
+    config.secrets.openai_api_key = None
 
     analyzer = SentimentAnalyzer(config)
     assert analyzer.analyze([{"comment_hash": "h1", "text": "نص"}]) == []

@@ -2,7 +2,9 @@
 
 windows:
   news_lookback_days: 14
-  comments_lookback_days: 7
+  # Three months. The owned accounts post infrequently and attract very few
+  # comments, so a 7-day window usually returns almost nothing.
+  comments_lookback_days: 90
 
 news:
   # Google News RSS and GDELT are both keyless public endpoints, so news
@@ -37,7 +39,9 @@ comments:
   # Comments are only collected for accounts we own; scraping competitor
   # comment threads adds cost without feeding the sentiment review.
   owned_only: true
-  max_posts_per_account: 10
+  # Must comfortably cover comments_lookback_days: the window is useless if the
+  # post fetch is truncated before reaching the start of it.
+  max_posts_per_account: 30
   max_comments_per_post: 50
   platforms: [instagram, x, youtube]
 

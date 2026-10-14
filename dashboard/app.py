@@ -278,6 +278,11 @@ header(
     updated,
 )
 
+with st.container(key="phone_refresh"):
+    if st.button("تحديث البيانات", key="refresh_phone", width="stretch"):
+        st.cache_data.clear()
+        st.rerun()
+
 # Synthetic data must be impossible to mistake for a real collection run.
 is_demo = (
     not comments_df.empty

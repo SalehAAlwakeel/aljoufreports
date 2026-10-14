@@ -384,33 +384,15 @@ h5 {{
     height: 0;
 }}
 
-/* A collapsed sidebar is translated sideways. Under RTL that translation
-   paints its labels as a vertical strip over the page. Hide the panel and
-   keep only the button that opens it. */
-[data-testid="stSidebar"][aria-expanded="false"] {{
-    transform: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    height: 0 !important;
+/* Streamlit slides a closed sidebar off-screen with translateX. In RTL that
+   slide crosses the page and leaves a vertical strip of labels. On a phone
+   the panel is removed; the refresh control lives on the page instead. */
+.stSidebar,
+[data-testid="stSidebar"] {{
     overflow: hidden !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: 0 !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
 }}
-[data-testid="stSidebar"][aria-expanded="false"] [data-testid="stSidebarCollapseButton"] {{
-    visibility: visible !important;
-    pointer-events: auto !important;
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 1000002;
-    background: {SURFACE};
-    border: 1px solid {LINE};
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(22, 36, 31, 0.12);
+.st-key-phone_refresh {{
+    display: none !important;
 }}
 .modebar-container, .modebar {{
     display: none !important;
@@ -420,21 +402,29 @@ h5 {{
    it beside a 300px panel, and the metric row becomes two cards across. */
 @media (max-width: 820px) {{
     .block-container {{
-        padding-top: 3.2rem !important;
+        padding-top: 1.25rem !important;
         padding-left: 0.75rem !important;
         padding-right: 0.75rem !important;
     }}
-    [data-testid="stSidebar"][aria-expanded="true"] {{
-        position: fixed !important;
-        z-index: 1000001;
-        inset: 0;
-        width: 100% !important;
-        min-width: 100% !important;
-        max-width: 100% !important;
-        height: 100dvh !important;
+    .stSidebar,
+    [data-testid="stSidebar"] {{
+        display: none !important;
         transform: none !important;
-        background: {SURFACE};
-        overflow: auto !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 0 !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        overflow: hidden !important;
+        visibility: hidden !important;
+        position: absolute !important;
+        pointer-events: none !important;
+    }}
+    .st-key-phone_refresh {{
+        display: block !important;
+        margin: 0 0 12px;
     }}
     [data-testid="stHorizontalBlock"] {{
         flex-wrap: wrap !important;

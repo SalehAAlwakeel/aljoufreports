@@ -28,7 +28,16 @@ for extra_path in (PROJECT_ROOT / "src", HERE):
 from aljouf_report.config import load_config  # noqa: E402
 from aljouf_report.models import DEMO_MODEL_TAG, PLATFORM_AR, SENTIMENT_AR  # noqa: E402
 from aljouf_report.storage import Database  # noqa: E402
-from theme import SENTIMENT_COLORS, apply_rtl, header, rtl_layout  # noqa: E402
+from theme import (  # noqa: E402
+    BENCHMARK_COLORS,
+    LINE_DASHES,
+    MARKER_SYMBOLS,
+    PRIMARY,
+    SENTIMENT_COLORS,
+    apply_rtl,
+    header,
+    rtl_layout,
+)
 
 st.set_page_config(
     page_title="لوحة وسائل التواصل | المكتب الاستراتيجي لتطوير منطقة الجوف",
@@ -88,7 +97,13 @@ def load_frames(db_path: str) -> dict[str, pd.DataFrame]:
         followers["المنصة"] = followers["platform"].map(
             lambda p: PLATFORM_AR.get(p, p)
         )
-        followers["الجهة"] = followers["entity_name_ar"]
+        # Short labels: ten entities sharing a long name prefix make legends,
+        # filters and axis ticks unreadable.
+        short_names = {e.key: e.short_name for e in config.accounts.entities}
+        followers["الجهة"] = followers.apply(
+            lambda row: short_names.get(row["entity_key"], row["entity_name_ar"]),
+            axis=1,
+        )
         followers["النوع"] = followers["owned"].map(
             {True: "حساباتنا", False: "الجهات المرجعية"}
         )
@@ -114,7 +129,11 @@ config = get_config()
 db_path = str(config.db_path)
 
 if not config.db_path.exists():
-    header("لوحة وسائل التواصل الاجتماعي", "لا توجد بيانات بعد")
+    header(
+        "لوحة وسائل التواصل الاجتماعي",
+        "المكتب الاستراتيجي لتطوير منطقة الجوف",
+        "لا توجد بيانات بعد",
+    )
     st.warning(
         "قاعدة البيانات غير موجودة. شغّل خط المعالجة أولاً:\n\n"
         "```\npython -m aljouf_report run\n```\n\n"
@@ -133,40 +152,17 @@ comments_df = frames["comments"]
 # Sidebar filters
 # --------------------------------------------------------------------------- #
 with st.sidebar:
-    st.markdown("### ⚙️ عوامل التصفية")
-
-    platform_options = sorted(followers_df["platform"].unique()) if not followers_df.empty else []
-    selected_platforms = st.multiselect(
-        "المنصات",
-        options=platform_options,
-        default=platform_options,
-        format_func=lambda p: PLATFORM_AR.get(p, p),
-    )
-
-    entity_options = (
-        followers_df[["entity_key", "entity_name_ar"]]
-        .drop_duplicates()
-        .set_index("entity_key")["entity_name_ar"]
-        .to_dict()
-        if not followers_df.empty
-        else {}
-    )
-    selected_entities = st.multiselect(
-        "الجهات",
-        options=list(entity_options.keys()),
-        default=list(entity_options.keys()),
-        format_func=lambda k: entity_options.get(k, k),
-    )
-
-    st.divider()
-    if st.button("🔄 تحديث البيانات"):
+    st.markdown("### ⚙️ العرض")
+    if st.button("🔄 تحديث البيانات", width="stretch"):
         st.cache_data.clear()
         st.rerun()
-
     st.divider()
     st.caption(f"قاعدة البيانات: `{config.db_path.name}`")
     st.caption(f"نافذة الأخبار: {config.settings.windows.news_lookback_days} يوماً")
-    st.caption(f"نافذة التعليقات: {config.settings.windows.comments_lookback_days} أيام")
+    st.caption(
+        f"جمع التعليقات: آخر {config.settings.windows.comments_scrape_days} أيام · "
+        f"العرض: {config.settings.windows.comments_lookback_days} يوماً"
+    )
     refresh_minutes = config.settings.dashboard.auto_refresh_minutes
     if refresh_minutes > 0:
         st.caption(f"تحديث تلقائي: كل {refresh_minutes} دقيقة")
@@ -174,19 +170,96 @@ with st.sidebar:
 auto_refresh(config.settings.dashboard.auto_refresh_minutes)
 
 
+def render_comments(frame: pd.DataFrame, height: int = 760) -> None:
+    """Full-text comment cards. A table clips Arabic mid-sentence."""
+    if frame.empty:
+        st.info("لا توجد تعليقات مطابقة.")
+        return
+    ordered = frame.sort_values("published_at", ascending=False, na_position="last")
+    with st.container(height=height):
+        for _, row in ordered.iterrows():
+            published = (
+                row["published_at"].strftime("%Y-%m-%d %H:%M")
+                if pd.notna(row.get("published_at"))
+                else "تاريخ غير معروف"
+            )
+            kind = {
+                "Positive": "is-positive",
+                "Negative": "is-negative",
+                "Neutral": "is-neutral",
+            }.get(str(row.get("label") or ""), "")
+            reason = str(row.get("reason_ar") or "").strip()
+            reason_html = (
+                f'<div class="reason">{html.escape(reason)}</div>' if reason else ""
+            )
+            st.markdown(
+                f"""<div class="comment-card {kind}">
+                      <div class="meta">
+                        <span class="badge">{html.escape(str(row.get('التصنيف') or ''))}</span>
+                        {html.escape(str(row.get('المنصة') or ''))} ·
+                        {html.escape(str(row.get('author') or 'مستخدم'))} ·
+                        {published}
+                      </div>
+                      <div class="body">{html.escape(str(row.get('text') or ''))}</div>
+                      {reason_html}
+                    </div>""",
+                unsafe_allow_html=True,
+            )
+
+
+def render_news(frame: pd.DataFrame, height: int = 780) -> None:
+    """Article cards in the same layout as the comment list."""
+    if frame.empty:
+        st.info("لا توجد أخبار مطابقة.")
+        return
+    languages = {"ar": "العربية", "en": "English"}
+    ordered = frame.sort_values("published_at", ascending=False, na_position="last")
+    with st.container(height=height):
+        for _, row in ordered.iterrows():
+            published = (
+                row["published_at"].strftime("%Y-%m-%d %H:%M")
+                if pd.notna(row.get("published_at"))
+                else "تاريخ غير معروف"
+            )
+            keyword = str(row.get("keyword") or "").split(",")[0].strip()
+            language = languages.get(str(row.get("language") or ""), str(row.get("language") or ""))
+            source = str(row.get("source") or row.get("domain") or "مصدر غير معروف")
+            url = str(row.get("url") or "").strip()
+            title = html.escape(str(row.get("title") or ""))
+            title_html = f'<a href="{html.escape(url)}" target="_blank">{title}</a>' if url else title
+            link_html = (
+                f'<div class="reason"><a href="{html.escape(url)}" target="_blank">فتح المقال</a></div>'
+                if url
+                else ""
+            )
+            st.markdown(
+                f"""<div class="comment-card">
+                      <div class="meta">
+                        <span class="badge">{html.escape(keyword or language)}</span>
+                        {html.escape(source)} · {html.escape(language)} · {published}
+                      </div>
+                      <div class="body">{title_html}</div>
+                      {link_html}
+                    </div>""",
+                unsafe_allow_html=True,
+            )
+
+
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     out = df
-    if selected_platforms and "platform" in out.columns:
+    if "platform" in out.columns:
         out = out[out["platform"].isin(selected_platforms)]
-    if selected_entities and "entity_key" in out.columns:
+    if "entity_key" in out.columns:
         out = out[out["entity_key"].isin(selected_entities)]
     return out
 
 
-followers_f = apply_filters(followers_df)
-comments_f = apply_filters(comments_df)
+# Filled in by the filter bar, which is rendered under the header so the
+# account picker is part of the page rather than a cramped sidebar.
+selected_platforms: list[str] = []
+selected_entities: list[str] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -195,10 +268,15 @@ comments_f = apply_filters(comments_df)
 latest_run_time = (
     followers_df["run_started_at"].max() if not followers_df.empty else None
 )
-subtitle = "المكتب الاستراتيجي لتطوير منطقة الجوف · تقرير آلي أسبوعي"
+updated = None
 if latest_run_time is not None and pd.notna(latest_run_time):
-    subtitle += f" · آخر تحديث {latest_run_time.strftime('%Y-%m-%d %H:%M')} UTC"
-header("📊 لوحة وسائل التواصل الاجتماعي", subtitle)
+    updated = latest_run_time.strftime("%Y-%m-%d  ·  %H:%M UTC")
+header(
+    "لوحة وسائل التواصل الاجتماعي",
+    "المكتب الاستراتيجي لتطوير منطقة الجوف",
+    "تقرير آلي أسبوعي",
+    updated,
+)
 
 # Synthetic data must be impossible to mistake for a real collection run.
 is_demo = (
@@ -216,10 +294,12 @@ if is_demo:
 
 
 def owned_totals(df: pd.DataFrame) -> tuple[int | None, int | None]:
-    """Total followers for our accounts in the latest run vs the previous one.
+    """Current follower total for our accounts, and how many were added since the last refresh.
 
-    Runs that collected no follower counts (a missing Apify token, or an actor
-    outage) are skipped, so a failed run does not report the total as zero.
+    The total is every count from the latest run. The change only includes
+    accounts that already had a number last time, so a platform collected for
+    the first time does not look like thousands of new followers. Runs with no
+    counts at all are skipped, so a failed collection does not zero the total.
     """
     if df.empty:
         return None, None
@@ -227,11 +307,52 @@ def owned_totals(df: pd.DataFrame) -> tuple[int | None, int | None]:
     if owned.empty:
         return None, None
     runs = sorted(owned["run_id"].unique())
-    latest = int(owned[owned["run_id"] == runs[-1]]["followers"].sum())
+    latest_rows = owned[owned["run_id"] == runs[-1]]
+    latest = int(latest_rows["followers"].sum())
     if len(runs) < 2:
         return latest, None
-    previous = int(owned[owned["run_id"] == runs[-2]]["followers"].sum())
-    return latest, previous
+
+    keys = ["entity_key", "platform"]
+    previous_rows = owned[owned["run_id"] == runs[-2]]
+    shared = latest_rows.merge(
+        previous_rows[keys + ["followers"]],
+        on=keys,
+        how="inner",
+        suffixes=("_now", "_before"),
+    )
+    if shared.empty:
+        return latest, None
+    added = int(shared["followers_now"].sum() - shared["followers_before"].sum())
+    return latest, added
+
+
+def entity_styles(names: list[str], our_names: set[str]) -> dict[str, dict]:
+    """Color, dash, and marker for each entity line.
+
+    Benchmarks cycle through a dark palette. Dashes differ so two regions with
+    nearly the same follower total, drawn on top of each other, both stay visible.
+    """
+    styles: dict[str, dict] = {}
+    bench = 0
+    for name in names:
+        if name in our_names:
+            styles[name] = {
+                "color": PRIMARY,
+                "dash": "solid",
+                "symbol": "circle",
+                "width": 4.5,
+                "size": 10,
+            }
+            continue
+        styles[name] = {
+            "color": BENCHMARK_COLORS[bench % len(BENCHMARK_COLORS)],
+            "dash": LINE_DASHES[bench % len(LINE_DASHES)],
+            "symbol": MARKER_SYMBOLS[bench % len(MARKER_SYMBOLS)],
+            "width": 2.6,
+            "size": 8,
+        }
+        bench += 1
+    return styles
 
 
 def owned_by_platform(df: pd.DataFrame) -> pd.DataFrame:
@@ -257,7 +378,71 @@ def owned_by_platform(df: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values("now", ascending=False)
 
 
-total_now, total_before = owned_totals(followers_f)
+entity_labels = {e.key: e.short_name for e in config.accounts.entities}
+owned_keys = {e.key for e in config.accounts.entities if e.owned}
+present_keys = (
+    list(dict.fromkeys(followers_df["entity_key"].tolist()))
+    if not followers_df.empty
+    else list(entity_labels)
+)
+present_keys.sort(key=lambda key: (key not in owned_keys, entity_labels.get(key, key)))
+platform_options = (
+    sorted(followers_df["platform"].dropna().unique()) if not followers_df.empty else []
+)
+
+with st.container(border=True):
+    st.markdown("##### الحسابات المعروضة")
+    scope = st.segmented_control(
+        "نطاق الحسابات",
+        options=["all", "ours", "benchmarks"],
+        default="all",
+        format_func=lambda key: {
+            "all": "كل الجهات",
+            "ours": "حساباتنا",
+            "benchmarks": "الجهات المرجعية",
+        }[key],
+        key="account_scope",
+        label_visibility="collapsed",
+    )
+    if scope == "ours":
+        choices = [key for key in present_keys if key in owned_keys]
+    elif scope == "benchmarks":
+        choices = [key for key in present_keys if key not in owned_keys]
+    else:
+        choices = present_keys
+
+    def _account_label(key: str) -> str:
+        name = entity_labels.get(key, key)
+        return f"{name}  ·  حساباتنا" if key in owned_keys else name
+
+    if choices:
+        picked_entities = st.pills(
+            "الجهات",
+            options=choices,
+            selection_mode="multi",
+            default=choices,
+            format_func=_account_label,
+            key=f"entity_pills_{scope}",
+        )
+        selected_entities = list(picked_entities or [])
+    if platform_options:
+        picked_platforms = st.pills(
+            "المنصات",
+            options=platform_options,
+            selection_mode="multi",
+            default=platform_options,
+            format_func=lambda platform: PLATFORM_AR.get(platform, platform),
+            key="platform_pills",
+        )
+        selected_platforms = list(picked_platforms or [])
+
+if not selected_entities:
+    st.info("اختر جهة واحدة على الأقل.")
+
+followers_f = apply_filters(followers_df)
+comments_f = apply_filters(comments_df)
+
+total_now, followers_added = owned_totals(followers_f)
 sentiment_counts = (
     comments_f["label"].value_counts().to_dict() if not comments_f.empty else {}
 )
@@ -269,14 +454,20 @@ positive_share = (
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
+    if followers_added is None:
+        follower_delta = None
+        follower_delta_color = "normal"
+    elif followers_added == 0:
+        follower_delta = "بدون تغيير"
+        follower_delta_color = "off"
+    else:
+        follower_delta = f"{followers_added:+,}"
+        follower_delta_color = "normal"
     st.metric(
         "إجمالي متابعي حساباتنا",
         f"{total_now:,}" if total_now is not None else "—",
-        delta=(
-            f"{total_now - total_before:+,}"
-            if total_now is not None and total_before is not None
-            else None
-        ),
+        delta=follower_delta,
+        delta_color=follower_delta_color,
     )
 with col2:
     st.metric("أخبار ورصد", f"{len(news_df):,}")
@@ -297,10 +488,19 @@ if not by_platform.empty:
         st.columns(len(by_platform)), by_platform.iterrows()
     ):
         delta = None
+        # A zero change is not growth; Streamlit draws an arrow on any delta,
+        # so switch the arrow off when the count is unchanged.
+        delta_color = "normal"
         if pd.notna(row["before"]):
             diff = int(row["now"]) - int(row["before"])
-            delta = f"{diff:+,}" if diff else "بدون تغيير"
-        column.metric(str(platform), f"{int(row['now']):,}", delta=delta)
+            if diff:
+                delta = f"{diff:+,}"
+            else:
+                delta = "بدون تغيير"
+                delta_color = "off"
+        column.metric(
+            str(platform), f"{int(row['now']):,}", delta=delta, delta_color=delta_color
+        )
 
 st.divider()
 
@@ -336,6 +536,11 @@ with tab_growth:
             )
 
             runs_available = trend["run_started_at"].nunique()
+            our_names = set(valid[valid["owned"]]["الجهة"].unique())
+            entity_order = sorted(
+                trend["الجهة"].unique(), key=lambda name: (name in our_names, name)
+            )
+            styles = entity_styles(entity_order, our_names)
             if runs_available < 2:
                 # A single run has no trend to draw, so compare levels instead.
                 st.caption(
@@ -361,10 +566,8 @@ with tab_growth:
                     "إجمالي المتابعين لكل جهة عبر المنصات المحددة. "
                     "خط حساباتنا مميّز بالسماكة واللون."
                 )
-                our_names = set(valid[valid["owned"]]["الجهة"].unique())
-                # Draw our own series last so it sits on top, and give the
-                # benchmark set a muted palette so the comparison reads at a
-                # glance instead of as ten competing lines.
+                # Explicit colors: Streamlit would otherwise substitute its own
+                # palette, and one of those swatches is too pale to see here.
                 fig = px.line(
                     trend,
                     x="run_started_at",
@@ -375,21 +578,37 @@ with tab_growth:
                         "run_started_at": "تاريخ التشغيل",
                         "followers": "عدد المتابعين",
                     },
-                    category_orders={
-                        "الجهة": sorted(
-                            trend["الجهة"].unique(), key=lambda n: n in our_names
-                        )
+                    category_orders={"الجهة": entity_order},
+                    color_discrete_map={
+                        name: style["color"] for name, style in styles.items()
                     },
                 )
                 for trace in fig.data:
-                    if trace.name in our_names:
-                        trace.line.update(width=4.5, color="#0b5d4a")
-                        trace.marker.update(size=9)
-                        trace.opacity = 1.0
-                    else:
-                        trace.line.update(width=1.5)
-                        trace.marker.update(size=5)
-                        trace.opacity = 0.5
+                    style = styles[trace.name]
+                    trace.line.update(
+                        width=style["width"], color=style["color"], dash=style["dash"]
+                    )
+                    trace.marker.update(
+                        size=style["size"],
+                        color=style["color"],
+                        symbol=style["symbol"],
+                    )
+                    trace.opacity = 1.0
+                # Solid lines first, dashed lines after, ours last. A dashed
+                # line drawn over a matching solid one leaves gaps, so both
+                # regions stay visible when their totals coincide.
+                fig.data = tuple(
+                    sorted(
+                        fig.data,
+                        key=lambda trace: (
+                            2
+                            if trace.name in our_names
+                            else 0
+                            if styles[trace.name]["dash"] == "solid"
+                            else 1
+                        ),
+                    )
+                )
                 st.plotly_chart(
                     rtl_layout(fig, height=480)
                 )
@@ -405,6 +624,10 @@ with tab_growth:
                 barmode="group",
                 labels={"followers": "عدد المتابعين", "المنصة": ""},
                 text_auto=".2s",
+                color_discrete_map={
+                    name: style["color"] for name, style in styles.items()
+                },
+                category_orders={"الجهة": entity_order},
             )
             st.plotly_chart(
                 rtl_layout(by_platform, height=430)
@@ -507,36 +730,17 @@ with tab_sentiment:
                 st.plotly_chart(rtl_layout(bars, height=400))
 
             st.markdown("#### جميع التعليقات المحللة")
-            label_filter = st.multiselect(
+            label_filter = st.pills(
                 "تصفية بالتصنيف",
                 options=["Positive", "Neutral", "Negative"],
+                selection_mode="multi",
                 default=["Positive", "Neutral", "Negative"],
                 format_func=lambda lab: SENTIMENT_AR.get(lab, lab),
                 key="sentiment_label_filter",
             )
-            view = scored[scored["label"].isin(label_filter)]
-            st.dataframe(
-                view[
-                    ["published_at", "المنصة", "التصنيف", "text", "reason_ar", "author", "likes"]
-                ]
-                .rename(
-                    columns={
-                        "published_at": "التاريخ",
-                        "text": "التعليق",
-                        "reason_ar": "سبب التصنيف",
-                        "author": "الحساب",
-                        "likes": "إعجابات",
-                    }
-                )
-                .sort_values("التاريخ", ascending=False),
-                hide_index=True,
-                height=420,
-                column_config={
-                    "التاريخ": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm"),
-                    "التعليق": st.column_config.TextColumn(width="large"),
-                    "سبب التصنيف": st.column_config.TextColumn(width="medium"),
-                },
-            )
+            view = scored[scored["label"].isin(label_filter or [])]
+            st.caption(f"{len(view):,} تعليق")
+            render_comments(view, height=780)
 
 
 # --------------------------------- News ------------------------------------ #
@@ -548,59 +752,50 @@ with tab_news:
             f"#### الأخبار والترندات (آخر {config.settings.windows.news_lookback_days} يوماً)"
         )
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            keyword_options = sorted(
-                {
-                    k.strip()
-                    for row in news_df["keyword"].fillna("")
-                    for k in str(row).split(",")
-                    if k.strip()
-                }
-            )
-            keyword_filter = st.multiselect(
-                "الكلمات المفتاحية", keyword_options, default=keyword_options
-            )
-        with c2:
-            lang_options = sorted(news_df["language"].fillna("").unique())
-            lang_filter = st.multiselect("اللغة", lang_options, default=lang_options)
-        with c3:
-            search = st.text_input("بحث في العنوان", placeholder="اكتب كلمة للبحث…")
+        keyword_options = sorted(
+            {
+                k.strip()
+                for row in news_df["keyword"].fillna("")
+                for k in str(row).split(",")
+                if k.strip()
+            }
+        )
+        keyword_filter = st.pills(
+            "الكلمات المفتاحية",
+            options=keyword_options,
+            selection_mode="multi",
+            default=keyword_options,
+            key="news_keywords",
+        )
+        lang_options = sorted(news_df["language"].fillna("").unique())
+        lang_labels = {"ar": "العربية", "en": "English"}
+        lang_filter = st.pills(
+            "اللغة",
+            options=lang_options,
+            selection_mode="multi",
+            default=lang_options,
+            format_func=lambda code: lang_labels.get(code, code),
+            key="news_languages",
+        )
+        search = st.text_input("بحث في العنوان", placeholder="اكتب كلمة للبحث…")
 
         view = news_df.copy()
         if keyword_filter:
-            pattern = "|".join(pd.Series(keyword_filter).map(lambda k: str(k)).tolist())
+            pattern = "|".join(pd.Series(list(keyword_filter)).map(lambda k: str(k)).tolist())
             view = view[
                 view["keyword"].fillna("").str.contains(pattern, case=False, regex=True)
             ]
+        else:
+            view = view.iloc[0:0]
         if lang_filter:
-            view = view[view["language"].fillna("").isin(lang_filter)]
+            view = view[view["language"].fillna("").isin(list(lang_filter))]
+        else:
+            view = view.iloc[0:0]
         if search:
             view = view[view["title"].str.contains(search, case=False, na=False)]
 
-        st.caption(f"عدد النتائج: {len(view):,} من أصل {len(news_df):,}")
-
-        st.dataframe(
-            view[["published_at", "title", "source", "keyword", "language", "url"]]
-            .rename(
-                columns={
-                    "published_at": "تاريخ النشر",
-                    "title": "العنوان",
-                    "source": "المصدر",
-                    "keyword": "الكلمة المفتاحية",
-                    "language": "اللغة",
-                    "url": "الرابط",
-                }
-            )
-            .sort_values("تاريخ النشر", ascending=False),
-            hide_index=True,
-            height=460,
-            column_config={
-                "تاريخ النشر": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm"),
-                "العنوان": st.column_config.TextColumn(width="large"),
-                "الرابط": st.column_config.LinkColumn("الرابط", display_text="فتح"),
-            },
-        )
+        st.caption(f"{len(view):,} خبر")
+        render_news(view, height=780)
 
         g1, g2 = st.columns(2)
         with g1:
@@ -662,50 +857,7 @@ with tab_review:
             "السبب مولَّد آلياً بواسطة نموذج لغوي يراعي اللهجة السعودية والسخرية."
         )
 
-        st.dataframe(
-            negative[
-                ["published_at", "المنصة", "author", "text", "reason_ar", "likes", "comment_url"]
-            ]
-            .rename(
-                columns={
-                    "published_at": "التاريخ",
-                    "author": "الحساب",
-                    "text": "التعليق",
-                    "reason_ar": "سبب التصنيف",
-                    "likes": "إعجابات",
-                    "comment_url": "الرابط",
-                }
-            )
-            .sort_values("التاريخ", ascending=False),
-            hide_index=True,
-            height=380,
-            column_config={
-                "التاريخ": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm"),
-                "التعليق": st.column_config.TextColumn(width="large"),
-                "سبب التصنيف": st.column_config.TextColumn(width="medium"),
-                "الرابط": st.column_config.LinkColumn("الرابط", display_text="فتح"),
-            },
-        )
-
-        st.markdown("##### عرض تفصيلي")
-        for _, row in negative.head(25).iterrows():
-            published = (
-                row["published_at"].strftime("%Y-%m-%d %H:%M")
-                if pd.notna(row.get("published_at"))
-                else "تاريخ غير معروف"
-            )
-            st.markdown(
-                f"""<div class="comment-card">
-                      <div class="meta">
-                        {html.escape(str(row.get('المنصة', '')))} ·
-                        {html.escape(str(row.get('author') or 'مستخدم'))} ·
-                        {published}
-                      </div>
-                      <div class="body">{html.escape(str(row.get('text') or ''))}</div>
-                      <div class="reason">⚠️ {html.escape(str(row.get('reason_ar') or ''))}</div>
-                    </div>""",
-                unsafe_allow_html=True,
-            )
+        render_comments(negative, height=640)
 
         csv = negative[["published_at", "platform", "author", "text", "reason_ar"]].to_csv(
             index=False

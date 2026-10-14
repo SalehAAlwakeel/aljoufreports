@@ -9,7 +9,19 @@ from aljouf_report.analysis.sentiment import (
     SentimentAnalyzer,
     SentimentBatchError,
     SentimentFatalError,
+    shorten_reason,
 )
+
+
+def test_shorten_reason_keeps_short_text():
+    assert shorten_reason("ثناء على العمل.") == "ثناء على العمل."
+
+
+def test_shorten_reason_clips_verbose_filler():
+    long = "استفسار بسيط عن توفر الوظائف دون أي تعبير عن رأي أو شكوى."
+    clipped = shorten_reason(long)
+    assert len(clipped.split()) <= 8
+    assert clipped.startswith("استفسار بسيط")
 from aljouf_report.config import load_config
 
 

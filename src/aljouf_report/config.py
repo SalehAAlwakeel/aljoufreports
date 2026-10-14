@@ -30,12 +30,23 @@ class Entity(BaseModel):
     key: str
     name_ar: str
     name_en: str
+    short_name_ar: str | None = None
     owned: bool = False
     platforms: dict[str, PlatformAccount] = Field(default_factory=dict)
 
     @property
     def display_name(self) -> str:
         return self.name_ar or self.name_en
+
+    @property
+    def short_name(self) -> str:
+        """Concise label for charts and filters.
+
+        Every entity name begins with a long shared prefix such as
+        "هيئة تطوير منطقة", which crowds out the region that actually
+        distinguishes them once ten of them share a legend.
+        """
+        return self.short_name_ar or self.name_ar or self.name_en
 
     def account(self, platform: str) -> PlatformAccount | None:
         return self.platforms.get(platform)
@@ -70,7 +81,11 @@ class AccountBook(BaseModel):
 # --------------------------------------------------------------------------- #
 class Windows(BaseModel):
     news_lookback_days: int = 14
-    comments_lookback_days: int = 7
+    # How far back stored comments stay visible on the dashboard and in email.
+    comments_lookback_days: int = 90
+    # How far back a pipeline run scrapes. Weekly runs must not re-fetch the
+    # archive already stored under comments_lookback_days.
+    comments_scrape_days: int = 7
 
 
 class NewsKeyword(BaseModel):

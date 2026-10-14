@@ -26,6 +26,22 @@ log = logging.getLogger(__name__)
 
 VALID_LABELS = {"Positive", "Negative", "Neutral"}
 
+# The dashboard shows this in a narrow column; longer reasons get cut off
+# mid-word and look like a bug. Eight Arabic words is enough to name the
+# reason without the filler the model likes to add.
+REASON_MAX_WORDS = 8
+
+
+def shorten_reason(text: str, max_words: int = REASON_MAX_WORDS) -> str:
+    """Keep the first `max_words` words so a verbose model cannot overflow."""
+    words = (text or "").strip().split()
+    if not words:
+        return "بدون سبب محدد."
+    clipped = " ".join(words[:max_words])
+    if len(words) > max_words and not clipped.endswith("."):
+        clipped += "."
+    return clipped
+
 
 class SentimentNotConfigured(RuntimeError):
     pass
@@ -214,7 +230,7 @@ class SentimentAnalyzer:
                 SentimentResult(
                     comment_hash=comment_hash,
                     label=label,  # type: ignore[arg-type]
-                    reason_ar=str(entry.get("reason_ar") or "").strip() or "بدون سبب محدد.",
+                    reason_ar=shorten_reason(str(entry.get("reason_ar") or "")),
                     confidence=confidence,
                     model=self.model,
                     analyzed_at=now,

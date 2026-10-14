@@ -33,6 +33,11 @@ def _fmt_int(value: Any) -> str:
         return "—"
 
 
+def _is_national_news(keyword: str) -> bool:
+    text = keyword.casefold()
+    return "saudi" in text or "السعودية" in keyword
+
+
 def _fmt_delta(delta: int | None) -> str:
     if delta is None:
         return '<span style="color:#7f8c8d">—</span>'
@@ -57,12 +62,19 @@ class WeeklyMailer:
         summary: RunSummary,
         owned_followers: Sequence[dict[str, Any]],
         top_negative: Sequence[dict[str, Any]],
-        news_count_by_keyword: dict[str, int],
+        week_comments: Sequence[dict[str, Any]],
+        week_news: Sequence[dict[str, Any]],
     ) -> str:
         cfg = self.config.settings
+        report_days = cfg.windows.comments_scrape_days
         sentiment = summary.sentiment_counts
         total_scored = sum(sentiment.values()) or 1
 
+        follower_total = sum(
+            int(row["followers"])
+            for row in owned_followers
+            if row.get("followers") is not None
+        )
         follower_rows = "\n".join(
             f"""
             <tr>
@@ -99,11 +111,52 @@ class WeeklyMailer:
             for row in top_negative
         ) or f'<tr><td style="{_TD}" colspan="3">لا توجد تعليقات سلبية هذا الأسبوع. 🎉</td></tr>'
 
+        comment_rows = "\n".join(
+            f"""
+            <tr>
+              <td style="{_TD}">{_esc(PLATFORM_AR.get(row.get('platform'), row.get('platform')))}</td>
+              <td style="{_TD}">{_esc(str(row.get('text') or '')[:300])}</td>
+              <td style="{_TD};color:{LABEL_COLORS.get(str(row.get('label')), '#333')};font-weight:700">
+                {_esc(SENTIMENT_AR.get(str(row.get('label') or ''), row.get('label') or '—'))}
+              </td>
+            </tr>"""
+            for row in list(week_comments)[:40]
+        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد تعليقات خلال آخر {report_days} أيام.</td></tr>'
+
+        news_counts: dict[str, int] = {}
+        for row in week_news:
+            for keyword in str(row.get("keyword") or "").split(","):
+                key = keyword.strip()
+                if key:
+                    news_counts[key] = news_counts.get(key, 0) + 1
         keyword_chips = " ".join(
             f'<span style="display:inline-block;background:#eef3f8;border-radius:12px;'
             f'padding:3px 10px;margin:2px;font-size:13px">{_esc(k)}: {v}</span>'
-            for k, v in sorted(news_count_by_keyword.items(), key=lambda kv: -kv[1])
+            for k, v in sorted(news_counts.items(), key=lambda kv: -kv[1])
         ) or "لا توجد أخبار."
+
+        ranked_news = sorted(
+            week_news,
+            key=lambda row: row.get("published_at") or "",
+            reverse=True,
+        )
+        ranked_news.sort(key=lambda row: _is_national_news(str(row.get("keyword") or "")))
+        shown_news = ranked_news[:25]
+        hidden_news = len(ranked_news) - len(shown_news)
+        news_rows = "\n".join(
+            f"""
+            <tr>
+              <td style="{_TD}"><a href="{_esc(row.get('url'))}" style="color:#0b5d4a">{_esc(row.get('title'))}</a></td>
+              <td style="{_TD}">{_esc(row.get('source') or row.get('domain'))}</td>
+              <td style="{_TD}">{_esc(str(row.get('published_at') or '')[:10])}</td>
+            </tr>"""
+            for row in shown_news
+        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد أخبار خلال آخر {report_days} أيام.</td></tr>'
+        news_more = (
+            f'<p style="margin:8px 0 0;font-size:13px;color:#7f8c8d">و{hidden_news} خبراً آخر على لوحة المعلومات.</p>'
+            if hidden_news
+            else ""
+        )
 
         errors_block = ""
         if summary.errors:
@@ -147,9 +200,9 @@ class WeeklyMailer:
 
       <table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-bottom:8px">
         <tr>
-          {_stat_cell('حسابات تم جمعها', summary.followers_collected)}
-          {_stat_cell('أخبار ورصد', summary.news_collected)}
-          {_stat_cell('تعليقات', summary.comments_collected)}
+          {_stat_cell('المتابعون عبر المنصات', follower_total)}
+          {_stat_cell('أخبار ورصد', len(week_news))}
+          {_stat_cell('تعليقات', len(week_comments))}
           {_stat_cell('تم تحليلها', summary.comments_analyzed)}
         </tr>
       </table>
@@ -174,12 +227,20 @@ class WeeklyMailer:
         <tbody>{follower_rows}</tbody>
       </table>
 
-      <h2 style="{_H2}">تحليل مشاعر التعليقات (آخر {cfg.windows.comments_lookback_days} أيام)</h2>
+      <h2 style="{_H2}">تحليل مشاعر التعليقات (آخر {report_days} أيام)</h2>
       <table style="{_TABLE}">
         <thead><tr>
           <th style="{_TH}">التصنيف</th><th style="{_TH}">العدد</th><th style="{_TH}">النسبة</th>
         </tr></thead>
         <tbody>{sentiment_rows}</tbody>
+      </table>
+
+      <h2 style="{_H2}">تعليقات آخر {report_days} أيام</h2>
+      <table style="{_TABLE}">
+        <thead><tr>
+          <th style="{_TH}">المنصة</th><th style="{_TH}">التعليق</th><th style="{_TH}">التصنيف</th>
+        </tr></thead>
+        <tbody>{comment_rows}</tbody>
       </table>
 
       <h2 style="{_H2}">تعليقات سلبية تحتاج مراجعة</h2>
@@ -190,8 +251,15 @@ class WeeklyMailer:
         <tbody>{negative_rows}</tbody>
       </table>
 
-      <h2 style="{_H2}">الأخبار والرصد (آخر {cfg.windows.news_lookback_days} يوماً)</h2>
-      <p style="margin:0">{keyword_chips}</p>
+      <h2 style="{_H2}">الأخبار ذات الصلة (آخر {report_days} أيام)</h2>
+      <p style="margin:0 0 12px">{keyword_chips}</p>
+      <table style="{_TABLE}">
+        <thead><tr>
+          <th style="{_TH}">العنوان</th><th style="{_TH}">المصدر</th><th style="{_TH}">التاريخ</th>
+        </tr></thead>
+        <tbody>{news_rows}</tbody>
+      </table>
+      {news_more}
 
       {errors_block}
 
@@ -206,14 +274,15 @@ class WeeklyMailer:
 </body>
 </html>"""
 
-    def render_text(self, summary: RunSummary) -> str:
+    def render_text(self, summary: RunSummary, follower_total: int | None = None) -> str:
         sentiment = " | ".join(
             f"{SENTIMENT_AR.get(k, k)}: {v}" for k, v in summary.sentiment_counts.items()
         ) or "لا توجد تعليقات محللة"
+        total = summary.followers_collected if follower_total is None else follower_total
         return (
             "تقرير وسائل التواصل الاجتماعي - المكتب الاستراتيجي لتطوير منطقة الجوف\n"
             f"التشغيل رقم: {summary.run_id}\n"
-            f"حسابات تم جمعها: {summary.followers_collected} "
+            f"المتابعون عبر المنصات: {total:,} "
             f"(تعذر: {summary.followers_failed})\n"
             f"أخبار: {summary.news_collected}\n"
             f"تعليقات: {summary.comments_collected} "
@@ -224,7 +293,9 @@ class WeeklyMailer:
         )
 
     # -- sending ---------------------------------------------------------- #
-    def send(self, summary: RunSummary, html_body: str) -> list[str]:
+    def send(
+        self, summary: RunSummary, html_body: str, follower_total: int | None = None
+    ) -> list[str]:
         if not self.enabled:
             reason = (
                 "SMTP credentials are incomplete"
@@ -247,7 +318,7 @@ class WeeklyMailer:
         )
         message["To"] = ", ".join(recipients)
         message["Date"] = formatdate(localtime=True)
-        message.set_content(self.render_text(summary))
+        message.set_content(self.render_text(summary, follower_total))
         message.add_alternative(html_body, subtype="html")
 
         try:

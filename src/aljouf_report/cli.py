@@ -114,6 +114,9 @@ def analyze(
     all_time: bool = typer.Option(
         False, "--all", help="Score every unscored comment, ignoring the window."
     ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-score comments that already have a reason."
+    ),
 ):
     """Score stored comments that have no sentiment yet, without re-scraping.
 
@@ -128,7 +131,7 @@ def analyze(
     db = Database(config.db_path)
 
     window = 36500 if all_time else (days or config.settings.windows.comments_lookback_days)
-    pending = db.comments_needing_sentiment(window)
+    pending = db.comments_needing_sentiment(window, include_scored=force)
     if not pending:
         console.print(
             "[green]Nothing to analyse.[/green] Every comment in the window is "
@@ -246,7 +249,7 @@ def send_email(
         console.print("[red]No completed runs found. Run the pipeline first.[/red]")
         raise typer.Exit(1)
 
-    window = config.settings.windows.comments_lookback_days
+    window = config.settings.windows.comments_scrape_days
     scored = pipeline.db.scored_comments(window)
     summary = RunSummary(
         run_id=run_id,
@@ -255,18 +258,23 @@ def send_email(
         followers_collected=sum(
             1 for r in pipeline.db.follower_history(1) if r["followers"] is not None
         ),
-        news_collected=len(pipeline.db.recent_news(config.settings.windows.news_lookback_days)),
+        news_collected=len(pipeline.db.recent_news(window)),
         comments_collected=len(scored),
         comments_analyzed=sum(1 for r in scored if r.get("label")),
         sentiment_counts=pipeline.db.sentiment_counts(window),
     )
 
     mailer = WeeklyMailer(config)
+    owned = pipeline.owned_follower_deltas()
+    follower_total = sum(
+        int(row["followers"]) for row in owned if row.get("followers") is not None
+    )
     html_body = mailer.render_html(
         summary,
-        owned_followers=pipeline.owned_follower_deltas(),
+        owned_followers=owned,
         top_negative=pipeline.top_negative_comments(),
-        news_count_by_keyword=pipeline.news_counts_by_keyword(),
+        week_comments=scored,
+        week_news=pipeline.db.recent_news(window),
     )
 
     if preview:
@@ -283,7 +291,7 @@ def send_email(
         )
         raise typer.Exit(1)
 
-    recipients = mailer.send(summary, html_body)
+    recipients = mailer.send(summary, html_body, follower_total)
     console.print(f"[green]Email sent to:[/green] {', '.join(recipients)}")
 
 

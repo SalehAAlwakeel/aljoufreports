@@ -59,8 +59,10 @@ class Pipeline:
         if not skip_sentiment:
             self._stage_sentiment(summary)
 
+        # The email reports this week's comments only. The dashboard keeps the
+        # full archive via comments_lookback_days.
         summary.sentiment_counts = self.db.sentiment_counts(
-            self.config.settings.windows.comments_lookback_days
+            self.config.settings.windows.comments_scrape_days
         )
 
         if not skip_sheets:
@@ -174,13 +176,19 @@ class Pipeline:
             log.info("Email skipped (SMTP or recipients not configured).")
             return
         try:
+            days = self.config.settings.windows.comments_scrape_days
+            owned = self.owned_follower_deltas()
+            follower_total = sum(
+                int(row["followers"]) for row in owned if row.get("followers") is not None
+            )
             body = mailer.render_html(
                 summary,
-                owned_followers=self.owned_follower_deltas(),
+                owned_followers=owned,
                 top_negative=self.top_negative_comments(),
-                news_count_by_keyword=self.news_counts_by_keyword(),
+                week_comments=self.db.scored_comments(days),
+                week_news=self.db.recent_news(days),
             )
-            mailer.send(summary, body)
+            mailer.send(summary, body, follower_total)
         except Exception as exc:  # noqa: BLE001 - email must not fail the run
             log.warning("Email failed: %s", exc)
             summary.errors.append(f"email: {exc}")
@@ -226,14 +234,14 @@ class Pipeline:
         return sorted(rows, key=lambda r: r["platform"])
 
     def top_negative_comments(self, limit: int = 10) -> list[dict[str, Any]]:
-        window = self.config.settings.windows.comments_lookback_days
+        window = self.config.settings.windows.comments_scrape_days
         negative = [
             row for row in self.db.scored_comments(window) if row.get("label") == "Negative"
         ]
         return negative[:limit]
 
     def news_counts_by_keyword(self) -> dict[str, int]:
-        window = self.config.settings.windows.news_lookback_days
+        window = self.config.settings.windows.comments_scrape_days
         counts: dict[str, int] = {}
         for row in self.db.recent_news(window):
             # A deduped article can carry several comma-joined keywords.

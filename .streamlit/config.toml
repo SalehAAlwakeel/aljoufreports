@@ -7,7 +7,7 @@ primaryColor = "#118a6e"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f4f8f7"
 textColor = "#263238"
-font = "sans serif"
+font = "'IBM Plex Sans Arabic':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap"
 
 [server]
 headless = true

@@ -11,6 +11,7 @@
 entities:
   - key: jsdo
     name_ar: المكتب الاستراتيجي لتطوير منطقة الجوف
+    short_name_ar: الجوف
     name_en: Jouf Strategic Development Office
     owned: true
     platforms:
@@ -29,6 +30,7 @@ entities:
 
   - key: makkah
     name_ar: هيئة تطوير منطقة مكة المكرمة
+    short_name_ar: مكة المكرمة
     name_en: Makkah Province Development Authority
     owned: false
     platforms:
@@ -47,6 +49,7 @@ entities:
 
   - key: madinah
     name_ar: هيئة تطوير منطقة المدينة المنورة
+    short_name_ar: المدينة المنورة
     name_en: Madinah Region Development Authority (MRDA)
     owned: false
     platforms:
@@ -65,6 +68,7 @@ entities:
 
   - key: sharqia
     name_ar: هيئة تطوير المنطقة الشرقية
+    short_name_ar: الشرقية
     name_en: Sharqia Development Authority
     owned: false
     platforms:
@@ -83,6 +87,7 @@ entities:
 
   - key: aseer
     name_ar: هيئة تطوير منطقة عسير
+    short_name_ar: عسير
     name_en: Aseer Development Authority (ASDA)
     owned: false
     platforms:
@@ -101,6 +106,7 @@ entities:
 
   - key: hail
     name_ar: هيئة تطوير منطقة حائل
+    short_name_ar: حائل
     name_en: Hail Region Development Authority
     owned: false
     platforms:
@@ -119,6 +125,7 @@ entities:
 
   - key: alahsa
     name_ar: هيئة تطوير الأحساء
+    short_name_ar: الأحساء
     name_en: AlAhsa Development Authority (AHDA)
     owned: false
     platforms:
@@ -134,6 +141,7 @@ entities:
 
   - key: albaha
     name_ar: المكتب الاستراتيجي لتطوير منطقة الباحة
+    short_name_ar: الباحة
     name_en: Al Baha Strategic Development Office
     owned: false
     platforms:
@@ -146,6 +154,7 @@ entities:
 
   - key: jazan
     name_ar: المكتب الاستراتيجي لتطوير منطقة جازان
+    short_name_ar: جازان
     name_en: Jazan Region Development Strategic Office
     owned: false
     platforms:
@@ -161,6 +170,7 @@ entities:
 
   - key: nbso
     name_ar: المكتب الاستراتيجي لتطوير منطقة الحدود الشمالية
+    short_name_ar: الحدود الشمالية
     name_en: Northern Borders Strategic Development Office
     owned: false
     platforms:

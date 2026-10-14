@@ -73,7 +73,7 @@ class CommentCollector:
 
     @property
     def _cutoff(self) -> datetime:
-        days = self.config.settings.windows.comments_lookback_days
+        days = self.config.settings.windows.comments_scrape_days
         return datetime.now(timezone.utc) - timedelta(days=days)
 
     def collect(self) -> list[SocialComment]:
@@ -118,28 +118,69 @@ class CommentCollector:
         log.warning("No comment collector for platform '%s'.", platform)
         return []
 
+    # LinkedIn company pages post several times a day, so a fixed post cap
+    # stops well short of the lookback window. Page until the posts are older
+    # than the window instead.
+    _LINKEDIN_PAGE_SIZE = 100
+    _LINKEDIN_MAX_PAGES = 4
+
     # -- LinkedIn: company posts, then comments on the ones that have any -- #
     def _linkedin(self, entity: Entity, account: PlatformAccount) -> list[SocialComment]:
         cfg = self.config.settings.comments
         actors = self.config.settings.apify
-
-        post_items, error = self.runner.run_safe(
-            actors.actor("linkedin_posts"),
-            {
-                "company_name": account.handle,
-                "limit": cfg.max_posts_per_account,
-                "sort": "recent",
-            },
-        )
-        if error:
-            self.errors.append(f"comments:{entity.key}/linkedin posts: {error}")
+        post_items = self._linkedin_posts(entity, account, actors)
+        post_ids = self.linkedin_comment_targets(post_items, self._cutoff)
+        if not post_ids:
             return []
 
-        # The posts payload reports a comment count, so posts without comments
-        # can be skipped entirely instead of paid for and discovered empty.
+        comment_items = self._linkedin_comments(entity, actors, post_ids, cfg.max_comments_per_post)
+        # The comments actor sometimes answers "0 comments" for a post that
+        # reported some. One retry recovers most of those without refetching
+        # the posts that already came back.
+        returned = {str(item.get("post_input")) for item in comment_items if isinstance(item, dict)}
+        missing = [post_id for post_id in post_ids if post_id not in returned]
+        if missing:
+            log.info("  linkedin: retrying %d posts the actor returned empty", len(missing))
+            comment_items.extend(
+                self._linkedin_comments(entity, actors, missing, cfg.max_comments_per_post)
+            )
+
+        return self._to_comments(
+            self._flatten_linkedin(comment_items), entity, "linkedin"
+        )
+
+    def _linkedin_posts(self, entity: Entity, account: PlatformAccount, actors: Any) -> list[dict[str, Any]]:
+        collected: list[dict[str, Any]] = []
         cutoff = self._cutoff
-        post_ids: list[str] = []
-        for item in post_items:
+        for page in range(1, self._LINKEDIN_MAX_PAGES + 1):
+            items, error = self.runner.run_safe(
+                actors.actor("linkedin_posts"),
+                {
+                    "company_name": account.handle,
+                    "limit": self._LINKEDIN_PAGE_SIZE,
+                    "sort": "recent",
+                    "page_number": page,
+                },
+            )
+            if error:
+                self.errors.append(f"comments:{entity.key}/linkedin posts: {error}")
+                break
+            page_items = [item for item in items if isinstance(item, dict)]
+            if not page_items:
+                break
+            collected.extend(page_items)
+            dates = [d for d in (first_datetime(item, DATE_PATHS) for item in page_items) if d]
+            if dates and min(dates) < cutoff:
+                break
+            if len(page_items) < self._LINKEDIN_PAGE_SIZE:
+                break
+        return collected
+
+    @staticmethod
+    def linkedin_comment_targets(items: list[dict[str, Any]], cutoff: datetime) -> list[str]:
+        """Post ids inside the window whose own stats say they have comments."""
+        ids: list[str] = []
+        for item in items:
             if not isinstance(item, dict):
                 continue
             published = first_datetime(item, DATE_PATHS)
@@ -148,27 +189,25 @@ class CommentCollector:
             if not parse_count((item.get("stats") or {}).get("comments")):
                 continue
             post_id = first_text(item, ("activity_urn", "full_urn", "post_url"))
-            if post_id:
-                post_ids.append(post_id)
+            if post_id and post_id not in ids:
+                ids.append(post_id)
+        return ids
 
-        if not post_ids:
-            return []
-
-        comment_items, error = self.runner.run_safe(
+    def _linkedin_comments(
+        self, entity: Entity, actors: Any, post_ids: list[str], limit: int
+    ) -> list[dict[str, Any]]:
+        items, error = self.runner.run_safe(
             actors.actor("linkedin_comments"),
             {
-                "postIds": post_ids[: cfg.max_posts_per_account],
-                "limit": cfg.max_comments_per_post,
+                "postIds": post_ids,
+                "limit": limit,
                 "sortOrder": "most recent",
             },
         )
         if error:
             self.errors.append(f"comments:{entity.key}/linkedin comments: {error}")
             return []
-
-        return self._to_comments(
-            self._flatten_linkedin(comment_items), entity, "linkedin"
-        )
+        return [item for item in items if isinstance(item, dict)]
 
     @staticmethod
     def _flatten_linkedin(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -225,19 +225,22 @@ class Database:
             )
         return len(rows)
 
-    def comments_needing_sentiment(self, days: int = 7) -> list[dict[str, Any]]:
+    def comments_needing_sentiment(
+        self, days: int = 7, *, include_scored: bool = False
+    ) -> list[dict[str, Any]]:
         cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
+        scored_filter = "" if include_scored else "AND s.comment_hash IS NULL"
         with self.connect() as conn:
             return [
                 dict(r)
                 for r in conn.execute(
-                    """
+                    f"""
                     SELECT c.comment_hash, c.text, c.platform, c.author
                     FROM comments c
                     LEFT JOIN sentiments s ON s.comment_hash = c.comment_hash
-                    WHERE s.comment_hash IS NULL
-                      AND (c.published_at IS NULL OR c.published_at >= ?)
+                    WHERE (c.published_at IS NULL OR c.published_at >= ?)
                       AND TRIM(c.text) != ''
+                      {scored_filter}
                     ORDER BY c.published_at DESC
                     """,
                     (cutoff,),

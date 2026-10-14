@@ -15,6 +15,7 @@ from .collectors import ApifyRunner, CommentCollector, FollowerCollector, NewsCo
 from .config import AppConfig, load_config
 from .models import RunSummary, utcnow
 from .notify import WeeklyMailer
+from .notify.mailer import report_file
 from .storage import Database, sync_all
 
 log = logging.getLogger(__name__)
@@ -177,18 +178,34 @@ class Pipeline:
             return
         try:
             days = self.config.settings.windows.comments_scrape_days
+            outside_days = max(days, self.config.settings.windows.news_lookback_days)
             owned = self.owned_follower_deltas()
             follower_total = sum(
                 int(row["followers"]) for row in owned if row.get("followers") is not None
             )
-            body = mailer.render_html(
+            week_comments = self.db.scored_comments(days)
+            week_news = self.db.recent_news(days)
+            outside_news = self.db.recent_news(outside_days)
+            ranking = self.follower_ranking()
+            top_negative = self.top_negative_comments()
+            body, _images = mailer.render_html(
                 summary,
                 owned_followers=owned,
-                top_negative=self.top_negative_comments(),
-                week_comments=self.db.scored_comments(days),
-                week_news=self.db.recent_news(days),
+                top_negative=top_negative,
+                week_comments=week_comments,
+                week_news=week_news,
+                ranking=ranking,
+                outside_news=outside_news,
             )
-            mailer.send(summary, body, follower_total)
+            report_name, report_bytes, report_subtype = report_file(body)
+            mailer.send(
+                summary,
+                body,
+                follower_total,
+                report_name=report_name,
+                report_bytes=report_bytes,
+                report_subtype=report_subtype,
+            )
         except Exception as exc:  # noqa: BLE001 - email must not fail the run
             log.warning("Email failed: %s", exc)
             summary.errors.append(f"email: {exc}")
@@ -232,6 +249,30 @@ class Pipeline:
             )
             rows.append({**row, "delta": delta})
         return sorted(rows, key=lambda r: r["platform"])
+
+    def follower_ranking(self) -> list[dict[str, Any]]:
+        """Every authority's latest follower total, largest first."""
+        history = self.db.follower_history(limit_runs=6)
+        counted = [row for row in history if row["followers"] is not None]
+        latest_by_entity: dict[str, int] = {}
+        for row in counted:
+            key = str(row["entity_key"])
+            latest_by_entity[key] = max(latest_by_entity.get(key, 0), int(row["run_id"]))
+        board = []
+        for key, run_id in latest_by_entity.items():
+            rows = [
+                row for row in counted
+                if str(row["entity_key"]) == key and int(row["run_id"]) == run_id
+            ]
+            board.append(
+                {
+                    "entity_key": key,
+                    "name": rows[0]["entity_name_ar"],
+                    "owned": bool(rows[0]["owned"]),
+                    "followers": sum(int(row["followers"]) for row in rows),
+                }
+            )
+        return sorted(board, key=lambda row: int(row["followers"]), reverse=True)
 
     def top_negative_comments(self, limit: int = 10) -> list[dict[str, Any]]:
         window = self.config.settings.windows.comments_scrape_days

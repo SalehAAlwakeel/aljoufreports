@@ -92,11 +92,19 @@ class NewsKeyword(BaseModel):
     query: str
     label: str
     language: str = "en"
+    # local: a town or the region. national: Saudi trending news.
+    scope: str = "local"
+    # Generic place names must also mention Al Jouf, or they match other countries.
+    require_region: bool = False
 
 
 class NewsSettings(BaseModel):
     sources: list[str] = Field(default_factory=lambda: ["google_news", "gdelt"])
     max_per_keyword: int = 40
+    # Publisher name or domain. Short names are matched exactly so "اليوم"
+    # does not pull in Egypt's اليوم السابع.
+    trusted_sources: list[str] = Field(default_factory=list)
+    blocked_sources: list[str] = Field(default_factory=list)
     keywords: list[NewsKeyword] = Field(default_factory=list)
 
 

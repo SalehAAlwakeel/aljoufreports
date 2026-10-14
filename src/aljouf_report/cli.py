@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -269,19 +270,38 @@ def send_email(
     follower_total = sum(
         int(row["followers"]) for row in owned if row.get("followers") is not None
     )
-    html_body = mailer.render_html(
+    outside_news = pipeline.db.recent_news(
+        max(window, config.settings.windows.news_lookback_days)
+    )
+    ranking = pipeline.follower_ranking()
+    top_negative = pipeline.top_negative_comments()
+    html_body, images = mailer.render_html(
         summary,
         owned_followers=owned,
-        top_negative=pipeline.top_negative_comments(),
+        top_negative=top_negative,
         week_comments=scored,
         week_news=pipeline.db.recent_news(window),
+        ranking=ranking,
+        outside_news=outside_news,
     )
+    from .notify.mailer import report_file
+
+    report_name, report_bytes, report_subtype = report_file(html_body)
 
     if preview:
         out = PROJECT_ROOT / "logs" / "email_preview.html"
+        report_out = PROJECT_ROOT / "logs" / report_name
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(html_body, encoding="utf-8")
+        preview_html = html_body
+        for cid, payload in images.items():
+            encoded = base64.b64encode(payload).decode("ascii")
+            preview_html = preview_html.replace(
+                f"cid:{cid}", f"data:image/png;base64,{encoded}"
+            )
+        out.write_text(preview_html, encoding="utf-8")
+        report_out.write_bytes(report_bytes)
         console.print(f"[green]Preview written:[/green] {out}")
+        console.print(f"[green]Report file:[/green] {report_out}")
         raise typer.Exit(0)
 
     if not mailer.enabled:
@@ -291,7 +311,14 @@ def send_email(
         )
         raise typer.Exit(1)
 
-    recipients = mailer.send(summary, html_body, follower_total)
+    recipients = mailer.send(
+        summary,
+        html_body,
+        follower_total,
+        report_name=report_name,
+        report_bytes=report_bytes,
+        report_subtype=report_subtype,
+    )
     console.print(f"[green]Email sent to:[/green] {', '.join(recipients)}")
 
 

@@ -36,14 +36,14 @@ from theme import (  # noqa: E402
     SENTIMENT_COLORS,
     apply_rtl,
     header,
-    rtl_layout,
+    show_chart,
 )
 
 st.set_page_config(
     page_title="لوحة وسائل التواصل | المكتب الاستراتيجي لتطوير منطقة الجوف",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 apply_rtl()
 
@@ -558,9 +558,7 @@ with tab_growth:
                     color_discrete_map={"حساباتنا": "#118a6e", "الجهات المرجعية": "#b0bec5"},
                     text_auto=".2s",
                 )
-                st.plotly_chart(
-                    rtl_layout(fig, height=460)
-                )
+                show_chart(fig, height=460)
             else:
                 st.caption(
                     "إجمالي المتابعين لكل جهة عبر المنصات المحددة. "
@@ -609,9 +607,7 @@ with tab_growth:
                         ),
                     )
                 )
-                st.plotly_chart(
-                    rtl_layout(fig, height=480)
-                )
+                show_chart(fig, height=480)
 
             st.markdown("#### المتابعون حسب المنصة (آخر تشغيل)")
             latest_run = valid["run_id"].max()
@@ -629,9 +625,7 @@ with tab_growth:
                 },
                 category_orders={"الجهة": entity_order},
             )
-            st.plotly_chart(
-                rtl_layout(by_platform, height=430)
-            )
+            show_chart(by_platform, height=430)
 
             with st.expander("📋 جدول المتابعين التفصيلي (آخر تشغيل)"):
                 table = latest[
@@ -704,7 +698,7 @@ with tab_sentiment:
                     showarrow=False,
                     font=dict(size=17),
                 )
-                st.plotly_chart(rtl_layout(donut, height=400))
+                show_chart(donut, height=400)
 
             with right:
                 st.markdown("#### المشاعر حسب المنصة")
@@ -727,7 +721,7 @@ with tab_sentiment:
                     labels={"المنصة": ""},
                     text_auto=True,
                 )
-                st.plotly_chart(rtl_layout(bars, height=400))
+                show_chart(bars, height=400)
 
             st.markdown("#### جميع التعليقات المحللة")
             label_filter = st.pills(
@@ -819,7 +813,7 @@ with tab_news:
                     text_auto=True,
                     color_discrete_sequence=["#118a6e"],
                 )
-                st.plotly_chart(rtl_layout(fig, height=340))
+                show_chart(fig, height=340)
 
         with g2:
             st.markdown("##### أكثر المصادر نشراً")
@@ -838,7 +832,7 @@ with tab_news:
                     text_auto=True,
                     color_discrete_sequence=["#0b5d4a"],
                 )
-                st.plotly_chart(rtl_layout(fig, height=340))
+                show_chart(fig, height=340)
 
 
 # --------------------------- Negative review ------------------------------- #

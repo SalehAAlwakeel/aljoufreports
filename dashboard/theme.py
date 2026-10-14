@@ -385,19 +385,24 @@ h5 {{
 }}
 
 /* A collapsed sidebar is translated sideways. Under RTL that translation
-   moves it into the page, so its text paints as a vertical strip over the
-   content. Collapse it to nothing and keep only the reopen button. */
+   paints its labels as a vertical strip over the page. Hide the panel and
+   keep only the button that opens it. */
 [data-testid="stSidebar"][aria-expanded="false"] {{
     transform: none !important;
     width: 0 !important;
     min-width: 0 !important;
     max-width: 0 !important;
+    height: 0 !important;
     overflow: hidden !important;
     padding: 0 !important;
+    margin: 0 !important;
     border: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
 }}
 [data-testid="stSidebar"][aria-expanded="false"] [data-testid="stSidebarCollapseButton"] {{
-    visibility: visible;
+    visibility: visible !important;
+    pointer-events: auto !important;
     position: fixed;
     top: 12px;
     left: 12px;
@@ -406,6 +411,9 @@ h5 {{
     border: 1px solid {LINE};
     border-radius: 12px;
     box-shadow: 0 1px 3px rgba(22, 36, 31, 0.12);
+}}
+.modebar-container, .modebar {{
+    display: none !important;
 }}
 
 /* Phone: the open sidebar covers the page instead of squeezing a sliver of
@@ -430,12 +438,21 @@ h5 {{
     }}
     [data-testid="stHorizontalBlock"] {{
         flex-wrap: wrap !important;
-        gap: 0.55rem !important;
+        gap: 0.65rem !important;
     }}
-    [data-testid="stColumn"] {{
-        flex: 1 1 calc(50% - 0.55rem) !important;
-        width: calc(50% - 0.55rem) !important;
-        min-width: calc(50% - 0.55rem) !important;
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }}
+    [data-testid="stPills"] {{
+        max-width: 100%;
+    }}
+    [data-testid="stPills"] [data-testid="stMarkdownContainer"],
+    [data-testid="stPills"] div {{
+        flex-wrap: wrap !important;
+        max-width: 100%;
     }}
     .jsdo-header {{
         flex-direction: column;
@@ -444,8 +461,14 @@ h5 {{
         border-radius: 14px;
         gap: 12px;
     }}
+    .jsdo-header-main {{
+        align-items: flex-start;
+    }}
+    .jsdo-kicker, .jsdo-header h1, .jsdo-meta {{
+        overflow-wrap: anywhere;
+    }}
     .jsdo-header h1 {{
-        font-size: 1.2rem !important;
+        font-size: 1.15rem !important;
     }}
     .jsdo-mark {{
         width: 44px;
@@ -476,11 +499,33 @@ h5 {{
         font-size: 1.02rem;
     }}
     [data-testid="stPlotlyChart"] {{
-        overflow-x: auto;
+        overflow: hidden;
+    }}
+    .stApp {{
+        padding-bottom: 4.5rem;
     }}
 }}
 </style>
 """
+
+
+# No zoom, pan, box, or lasso. A legend tap is the only way to change the chart.
+_CHART_CONFIG = {
+    "displayModeBar": False,
+    "displaylogo": False,
+    "scrollZoom": False,
+    "doubleClick": False,
+    "showTips": False,
+}
+
+
+def show_chart(fig, height: int | None = None) -> None:
+    st.plotly_chart(
+        rtl_layout(fig, height),
+        width="stretch",
+        config=_CHART_CONFIG,
+        selection_mode=(),
+    )
 
 
 def apply_rtl() -> None:
@@ -491,6 +536,7 @@ def rtl_layout(fig, height: int | None = None):
     """Apply RTL-aware Plotly layout: legend and axes flipped, Arabic font."""
     fig.update_layout(
         font=dict(family=ARABIC_FONT, size=14, color=INK),
+        dragmode=False,
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -498,16 +544,18 @@ def rtl_layout(fig, height: int | None = None):
             xanchor="right",
             x=1,
             traceorder="reversed",
+            itemclick="toggle",
+            itemdoubleclick=False,
             font=dict(size=13),
         ),
-        margin=dict(l=20, r=20, t=50, b=40),
+        margin=dict(l=8, r=8, t=56, b=24),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         hoverlabel=dict(font_family=ARABIC_FONT, align="right"),
     )
     # Category labels read right-to-left; the y axis sits on the right.
-    fig.update_yaxes(side="right", gridcolor="#eceff1")
-    fig.update_xaxes(gridcolor="#eceff1")
+    fig.update_yaxes(side="right", gridcolor="#eceff1", fixedrange=True)
+    fig.update_xaxes(gridcolor="#eceff1", fixedrange=True)
     if height:
         fig.update_layout(height=height)
     return fig

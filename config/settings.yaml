@@ -12,26 +12,124 @@ news:
   # Google News RSS and GDELT are both keyless public endpoints, so news
   # collection works before any paid credentials are configured.
   sources: [google_news, gdelt]
-  max_per_keyword: 40
+  max_per_keyword: 20
+  # A headline is kept only when it comes from one of these outlets.
+  # لحظات نيوز is blocked outright: it attaches Al Jouf town names to
+  # unrelated stories (Hong Kong, Egypt, and the like).
+  blocked_sources:
+    - لحظات
+    - lahzat
+    - lahazat
+  trusted_sources:
+    - وكالة الأنباء السعودية
+    - واس
+    - spa.gov.sa
+    - سبق
+    - sabq
+    - عكاظ
+    - okaz
+    - جريدة الرياض
+    - alriyadh
+    - صحيفة الجزيرة
+    - al-jazirah
+    - الاقتصادية
+    - aleqt
+    - صحيفة الوطن
+    - alwatan.com.sa
+    - صحيفة اليوم
+    - alyaum
+    - اليوم
+    - المدينة
+    - al-madina
+    - الشرق الأوسط
+    - aawsat
+    - العربية
+    - alarabiya
+    - الحدث
+    - alhadath
+    - الإخبارية
+    - الاخبارية
+    - alekhbariya
+    - سكاي نيوز
+    - skynewsarabia
+    - أخبار 24
+    - اخبار 24
+    - akhbaar24
+    - أرقام
+    - ارقام
+    - argaam
+    - Arab News
+    - arabnews
+    - Saudi Gazette
+    - saudigazette
+    - بي بي سي
+    - bbc
+    - رويترز
+    - reuters
+    - bloomberg
+    - بلومبرغ
+    - associated press
+    - apnews
+    - فرانس 24
+    - france24
+    - cnn
+    - الجزيرة نت
+    - aljazeera
+    - إندبندنت عربية
+    - independentarabia
+    - الشرق للأخبار
+    - asharq
+    - Gulf News
+    - gulfnews
   keywords:
-    - query: "Al Jouf"
-      label: Al Jouf
-      language: en
-    - query: "الجوف"
-      label: الجوف
-      language: ar
-    - query: "Sakaka"
-      label: Sakaka
-      language: en
-    - query: "سكاكا"
-      label: سكاكا
-      language: ar
-    - query: "Saudi Arabia"
-      label: Saudi Arabia
-      language: en
-    - query: "السعودية"
-      label: السعودية
-      language: ar
+    # Region and governorates. Distinctive names can stand alone.
+    - {query: "الجوف", label: الجوف, language: ar, scope: local}
+    - {query: "Al Jouf", label: Al Jouf, language: en, scope: local}
+    - {query: "سكاكا", label: سكاكا, language: ar, scope: local}
+    - {query: "Sakaka", label: Sakaka, language: en, scope: local}
+    - {query: "القريات", label: القريات, language: ar, scope: local}
+    - {query: "Qurayyat", label: Qurayyat, language: en, scope: local}
+    - {query: "دومة الجندل", label: دومة الجندل, language: ar, scope: local}
+    - {query: "Dumat al-Jandal", label: Dumat al-Jandal, language: en, scope: local}
+    - {query: "طبرجل", label: طبرجل, language: ar, scope: local}
+    - {query: "Tabarjal", label: Tabarjal, language: en, scope: local}
+    - {query: "صوير", label: صوير, language: ar, scope: local}
+    # Centers. Generic Arabic names must also say الجوف.
+    - {query: "أبو عجرم", label: أبو عجرم, language: ar, scope: local}
+    - {query: "زلوم", label: زلوم, language: ar, scope: local}
+    - {query: "العيساوية", label: العيساوية, language: ar, scope: local}
+    - {query: "الأضارع", label: الأضارع, language: ar, scope: local}
+    - {query: "ميقوع", label: ميقوع, language: ar, scope: local}
+    - {query: "النبك أبو قصر", label: النبك أبو قصر, language: ar, scope: local}
+    - {query: "الشويحطية", label: الشويحطية, language: ar, scope: local}
+    - {query: "خوعاء", label: خوعاء, language: ar, scope: local}
+    - {query: "طلعة عمار", label: طلعة عمار, language: ar, scope: local}
+    - {query: "عين الحواس", label: عين الحواس, language: ar, scope: local}
+    - {query: "رديفة الجماجم", label: رديفة الجماجم, language: ar, scope: local}
+    - {query: "قليب خضر", label: قليب خضر, language: ar, scope: local}
+    - {query: "غدير الخيل", label: غدير الخيل, language: ar, scope: local}
+    - {query: "ثنية أم نخيلة", label: ثنية أم نخيلة, language: ar, scope: local}
+    - {query: "الحديثة", label: الحديثة, language: ar, scope: local, require_region: true}
+    - {query: "الفياض", label: الفياض, language: ar, scope: local, require_region: true}
+    - {query: "عذفاء", label: عذفاء, language: ar, scope: local, require_region: true}
+    - {query: "المرير", label: المرير, language: ar, scope: local, require_region: true}
+    - {query: "مغيراء", label: مغيراء, language: ar, scope: local, require_region: true}
+    - {query: "الرفيعة", label: الرفيعة, language: ar, scope: local, require_region: true}
+    - {query: "هديب", label: هديب, language: ar, scope: local, require_region: true}
+    - {query: "الحرة", label: الحرة, language: ar, scope: local, require_region: true}
+    - {query: "أم أذن", label: أم أذن, language: ar, scope: local, require_region: true}
+    - {query: "الوادي", label: الوادي, language: ar, scope: local, require_region: true}
+    - {query: "الناصفة", label: الناصفة, language: ar, scope: local, require_region: true}
+    - {query: "الحماد", label: الحماد, language: ar, scope: local, require_region: true}
+    - {query: "أصفان", label: أصفان, language: ar, scope: local, require_region: true}
+    - {query: "الشقيق", label: الشقيق, language: ar, scope: local, require_region: true}
+    - {query: "الرديفة", label: الرديفة, language: ar, scope: local, require_region: true}
+    - {query: "بسيطاء", label: بسيطاء, language: ar, scope: local, require_region: true}
+    - {query: "الثنية", label: الثنية, language: ar, scope: local, require_region: true}
+    - {query: "صبيحا", label: صبيحا, language: ar, scope: local, require_region: true}
+    # National trending coverage, still limited to the outlets above.
+    - {query: "السعودية", label: ترند السعودية, language: ar, scope: national}
+    - {query: "Saudi Arabia", label: Saudi Arabia, language: en, scope: national}
 
 followers:
   # Which platforms to collect follower counts for.
@@ -85,7 +183,7 @@ email:
     - wakeelsaleh@gmail.com
   # Shown in the email body as the link to the live dashboard.
   # Override with DASHBOARD_URL in .env.
-  dashboard_url: http://localhost:8501
+  dashboard_url: https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/
 
 dashboard:
   # The dashboard reloads itself on this interval so an unattended screen stays

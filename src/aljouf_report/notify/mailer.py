@@ -1,21 +1,63 @@
-"""Weekly email: run summary plus a link to the live dashboard."""
+"""Weekly email, laid out like a one-page briefing.
+
+The structure follows the ministry media-summary sheet: a title band, the
+top stories, then large percentage graphics. Colors come from the Al Jouf
+2026 identity (olive, lavender, sand, gold, and poppy red).
+"""
 
 from __future__ import annotations
 
 import html
 import logging
 import smtplib
+import subprocess
+import tempfile
 from datetime import datetime
 from email.message import EmailMessage
+from email.policy import SMTP
 from email.utils import formataddr, formatdate
+from io import BytesIO
+from pathlib import Path
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 from ..config import AppConfig
 from ..models import PLATFORM_AR, SENTIMENT_AR, RunSummary
 
 log = logging.getLogger(__name__)
 
-LABEL_COLORS = {"Positive": "#1b8a5a", "Negative": "#c0392b", "Neutral": "#7f8c8d"}
+# Al Jouf 2026 identity palette.
+OLIVE = "#5d7e4e"
+OLIVE_DARK = "#3f5a36"
+LAVENDER = "#8867b9"
+SAND = "#f4a460"
+CREAM = "#fff8dc"
+GOLD = "#d4af37"
+STONE = "#8b7355"
+INK = "#3d3428"
+RED = "#c00000"
+PAPER = "#f6f1e4"
+WHITE = "#ffffff"
+MOON = "#bac3b5"
+
+_RGB = {
+    "olive": (93, 126, 78),
+    "lavender": (136, 103, 185),
+    "sand": (240, 217, 177),
+    "gold": (212, 175, 55),
+    "red": (192, 0, 0),
+    "moon": (186, 195, 181),
+    "ink": (61, 52, 40),
+    "white": (255, 255, 255),
+}
+
+_WEEKDAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+_MONTHS = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+]
+_RIYADH = ZoneInfo("Asia/Riyadh")
+_PLATFORM_ORDER = ("instagram", "x", "youtube", "linkedin")
 
 
 class EmailNotConfigured(RuntimeError):
@@ -34,18 +76,453 @@ def _fmt_int(value: Any) -> str:
 
 
 def _is_national_news(keyword: str) -> bool:
-    text = keyword.casefold()
-    return "saudi" in text or "السعودية" in keyword
+    parts = [part.strip() for part in keyword.split(",") if part.strip()]
+    if not parts:
+        return False
+    return all(
+        "saudi" in part.casefold() or "السعودية" in part or "ترند" in part
+        for part in parts
+    )
 
 
-def _fmt_delta(delta: int | None) -> str:
-    if delta is None:
-        return '<span style="color:#7f8c8d">—</span>'
-    if delta > 0:
-        return f'<span style="color:#1b8a5a">▲ {delta:,}</span>'
-    if delta < 0:
-        return f'<span style="color:#c0392b">▼ {abs(delta):,}</span>'
-    return '<span style="color:#7f8c8d">0</span>'
+def _change_percent(row: dict[str, Any]) -> float | None:
+    """Percent change versus the previous count. None when there is no baseline."""
+    followers = row.get("followers")
+    delta = row.get("delta")
+    if followers is None or delta is None:
+        return None
+    previous = int(followers) - int(delta)
+    if previous <= 0:
+        return None
+    return int(delta) / previous * 100
+
+
+def _overall_change(rows: Sequence[dict[str, Any]]) -> float | None:
+    previous = 0
+    delta = 0
+    comparable = False
+    for row in rows:
+        if row.get("followers") is None or row.get("delta") is None:
+            continue
+        before = int(row["followers"]) - int(row["delta"])
+        if before <= 0:
+            continue
+        comparable = True
+        previous += before
+        delta += int(row["delta"])
+    if not comparable or previous <= 0:
+        return None
+    return delta / previous * 100
+
+
+def _fmt_percent(value: float | None, *, signed: bool = False) -> str:
+    if value is None:
+        return "—"
+    if abs(value) < 0.05:
+        return "0%"
+    if signed:
+        return f"{value:+.0f}%"
+    return f"{value:.0f}%"
+
+
+def _share(count: int, total: int) -> str:
+    if total <= 0:
+        return "—"
+    return f"{count / total * 100:.0f}%"
+
+
+def _ltr(value: str) -> str:
+    """Keep percentages and dates from reversing inside Arabic text."""
+    return f'<span dir="ltr" style="unicode-bidi:embed">{value}</span>'
+
+
+def _font(size: int, bold: bool = False):
+    from PIL import ImageFont
+
+    names = ("tahomabd.ttf", "segoeuib.ttf", "arialbd.ttf") if bold else (
+        "tahoma.ttf",
+        "segoeui.ttf",
+        "arial.ttf",
+    )
+    windows = Path(r"C:\Windows\Fonts")
+    for name in names:
+        path = windows / name
+        if path.exists():
+            return ImageFont.truetype(str(path), size)
+    return ImageFont.load_default()
+
+
+def _donut(slices: list[tuple[float, str]], center: str, center_color: str) -> bytes:
+    """A ring chart. A single slice is drawn as a full ring."""
+    from PIL import Image, ImageDraw
+
+    size = 420
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    pad = 16
+    box = [pad, pad, size - pad, size - pad]
+    visible = [(value, _RGB.get(name, _RGB["moon"])) for value, name in slices if value > 0]
+    if not visible:
+        visible = [(1, _RGB["moon"])]
+    if len(visible) == 1:
+        draw.ellipse(box, fill=visible[0][1])
+    else:
+        total = sum(value for value, _ in visible)
+        start = -90.0
+        for value, color in visible:
+            sweep = 360.0 * value / total
+            draw.pieslice(box, start, start + sweep, fill=color)
+            start += sweep
+    hole = int(size * 0.31)
+    draw.ellipse([hole, hole, size - hole, size - hole], fill=_RGB["white"])
+    size_px = 72 if len(center) <= 2 else 52 if len(center) <= 4 else 36
+    font = _font(size_px, bold=True)
+    draw.text((size / 2, size / 2), center, fill=_RGB.get(center_color, _RGB["ink"]), font=font, anchor="mm")
+    image = image.resize((200, 200), Image.Resampling.LANCZOS)
+    # A transparent PNG is dropped by some mail clients, which left these
+    # two charts looking empty.
+    flat = Image.new("RGB", image.size, _RGB["white"])
+    flat.paste(image, mask=image.split()[-1])
+    buffer = BytesIO()
+    flat.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+_INTERNATIONAL = ("bbc", "cnn", "fox")
+_OTHER_INTERNATIONAL = ("reuters", "bloomberg", "apnews", "associated press")
+_SAUDI_OUTLETS = (
+    "وكالة الأنباء",
+    "واس",
+    "spa.gov",
+    "سبق",
+    "sabq",
+    "عكاظ",
+    "okaz",
+    "العربية",
+    "alarabiya",
+    "الشرق الأوسط",
+    "aawsat",
+    "الإخبارية",
+    "الاخبارية",
+    "alekhbariya",
+    "أخبار 24",
+    "اخبار 24",
+    "akhbaar24",
+    "أرقام",
+    "ارقام",
+    "argaam",
+    "صحيفة اليوم",
+    "alyaum",
+    "الاقتصادية",
+    "aleqt",
+    "الوطن",
+    "alwatan",
+    "المدينة",
+    "al-madina",
+    "arab news",
+    "arabnews",
+    "saudi gazette",
+    "saudigazette",
+    "الحدث",
+    "alhadath",
+)
+
+
+def _outlet_blob(row: dict[str, Any]) -> str:
+    return f"{row.get('source') or ''} {row.get('domain') or ''}".casefold()
+
+
+def _matches_outlet(row: dict[str, Any], names: tuple[str, ...]) -> bool:
+    blob = _outlet_blob(row)
+    return any(name in blob for name in names)
+
+
+def _prefer_arabic(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(rows, key=lambda row: str(row.get("published_at") or ""), reverse=True)
+    ordered.sort(key=lambda row: str(row.get("language") or "").lower() == "en")
+    return ordered
+
+
+_NEGATIVE_HEADLINES = (
+    "حرب", "هجوم", "هجمات", "مقتل", "وفاة", "قتلى", "قتيل", "ضحايا", "حوثي",
+    "اعتداء", "صاروخ", "انفجار", "إعدام", "اعدام", "قصف", "غارة", "إصابة",
+    "اصابة", "اشتباك", "دمار", "احتجاز", "احتجز", "اعتقال", "اعتقل", "فتن",
+    "تحذ", "استهداف", "استهدف", "أزمة", "ازمة", "عسكر", "مقاتل", "قوات",
+    "إنذار", "انذار", "ضربة", "ضربات", "دامي", "إدان", "توتر", "عقوب", "سجن",
+    "killed", "attack", "attacks", "war", "houthi", "strike", "strikes",
+    "missile", "death", "dead", "detained", "arrest",
+)
+_POSITIVE_HEADLINES = (
+    "فوز", "تفوز", "لقب", "كأس", "كاس", "إنجاز", "انجاز", "استثمار", "اتفاقية",
+    "اتفاقي", "نجاح", "نجح", "تطوير", "افتتاح", "جائزة", "نمو", "توقيع", "شراكة",
+    "تدشين", "إطلاق", "اطلاق", "تكريم", "بطولة", "تهنئ", "سياح", "مشروع",
+    "win", "wins", "title", "invest", "agreement", "growth", "award", "success",
+)
+# A cup win is fine, but a congratulations or an investment is the story to lead with.
+_WARM_HEADLINES = (
+    "تهنئ", "نجح", "نجاح", "استثمار", "سياح", "اتفاقي", "افتتاح", "جائز",
+    "تكريم", "إنجاز", "انجاز", "تدشين", "شراك", "مشروع", "success", "invest",
+)
+
+
+def _headline(row: dict[str, Any]) -> str:
+    return str(row.get("title") or "").casefold()
+
+
+def _is_negative_headline(row: dict[str, Any]) -> bool:
+    title = _headline(row)
+    return any(word.casefold() in title for word in _NEGATIVE_HEADLINES)
+
+
+def _is_positive_headline(row: dict[str, Any]) -> bool:
+    title = _headline(row)
+    return any(word.casefold() in title for word in _POSITIVE_HEADLINES)
+
+
+def _is_warm_headline(row: dict[str, Any]) -> bool:
+    title = _headline(row)
+    return any(word.casefold() in title for word in _WARM_HEADLINES)
+
+
+def _positive_stories(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Good news about Saudi Arabia: a success, a welcome, or an agreement."""
+    upbeat = [
+        row for row in rows
+        if _is_positive_headline(row) and not _is_negative_headline(row)
+    ]
+    ordered = sorted(upbeat, key=lambda row: str(row.get("published_at") or ""), reverse=True)
+    ordered.sort(
+        key=lambda row: (
+            0 if _is_warm_headline(row) else 1,
+            str(row.get("language") or "").lower() == "en",
+        )
+    )
+    return ordered
+
+
+def _select_news(
+    rows: Sequence[dict[str, Any]],
+    outside_rows: Sequence[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Two Al Jouf stories, one Saudi outlet, and one positive BBC, CNN, or Fox story."""
+    local = [row for row in rows if not _is_national_news(str(row.get("keyword") or ""))]
+    national = [row for row in rows if _is_national_news(str(row.get("keyword") or ""))]
+    wider = list(outside_rows) if outside_rows is not None else list(rows)
+    abroad_pool = [row for row in wider if _is_national_news(str(row.get("keyword") or ""))]
+    abroad = [row for row in abroad_pool if _matches_outlet(row, _INTERNATIONAL)]
+    if not _positive_stories(abroad):
+        abroad = [row for row in abroad_pool if _matches_outlet(row, _OTHER_INTERNATIONAL)]
+    domestic = [row for row in national if _matches_outlet(row, _SAUDI_OUTLETS)]
+    if not domestic:
+        skipped = {id(row) for row in abroad}
+        domestic = [row for row in national if id(row) not in skipped]
+    return _prefer_arabic(local)[:2] + _positive_stories(domestic)[:1] + _positive_stories(abroad)[:1]
+
+
+def _news_badge(row: dict[str, Any]) -> str:
+    if not _is_national_news(str(row.get("keyword") or "")):
+        return "الجوف"
+    if _matches_outlet(row, _INTERNATIONAL + _OTHER_INTERNATIONAL):
+        return "السعودية · دولي"
+    return "السعودية"
+
+
+def _extra_followers(rows: Sequence[dict[str, Any]]) -> int | None:
+    """New followers since the previous count. A first-time platform is not growth."""
+    found = False
+    total = 0
+    for row in rows:
+        if row.get("delta") is None or row.get("followers") is None:
+            continue
+        found = True
+        total += int(row["delta"])
+    return total if found else None
+
+
+def _fmt_signed_int(value: int | None) -> str:
+    if value is None:
+        return "—"
+    if value > 0:
+        return f"+{value:,}"
+    if value < 0:
+        return f"−{abs(value):,}"
+    return "0"
+
+
+def _comparison_window(
+    board: Sequence[dict[str, Any]], above: int = 2, below: int = 1
+) -> list[dict[str, Any]]:
+    """The accounts immediately above us, us, and the account immediately below."""
+    if not board:
+        return []
+    index = next((i for i, row in enumerate(board) if row.get("owned")), None)
+    if index is None:
+        return list(board[: above + below + 1])
+    start = max(0, index - above)
+    end = min(len(board), index + below + 1)
+    return list(board[start:end])
+
+
+def _top_comments(rows: Sequence[dict[str, Any]], label: str, limit: int = 3) -> list[dict[str, Any]]:
+    chosen = []
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if row.get("label") != label or len(text) < 8 or text.startswith("http"):
+            continue
+        chosen.append(row)
+    chosen.sort(
+        key=lambda row: (
+            len(str(row.get("text") or "").strip()),
+            float(row.get("confidence") or 0),
+            str(row.get("published_at") or ""),
+        ),
+        reverse=True,
+    )
+    return chosen[:limit]
+
+
+def _news_lines(rows: Sequence[dict[str, Any]]) -> str:
+    if not rows:
+        return f'<div style="color:{STONE}">لا توجد أخبار خلال هذه الفترة.</div>'
+    lines = []
+    for index, row in enumerate(rows, start=1):
+        title = _esc(row.get("title"))
+        url = _esc(row.get("url"))
+        source = _esc(row.get("source") or row.get("domain") or "")
+        link = f'<a href="{url}" style="color:{INK};text-decoration:none">{title}</a>' if url else title
+        lines.append(
+            f'<div style="margin:0 0 6px;font-size:14px;line-height:1.45">'
+            f'<b>{_ltr(str(index))}.</b> {link}'
+            f' <span style="color:{STONE}">· {_esc(_news_badge(row))} · {source}</span></div>'
+        )
+    return "".join(lines)
+
+
+def _platform_line(rows: Sequence[dict[str, Any]]) -> str:
+    if not rows:
+        return f'<span style="color:{STONE}">لا توجد بيانات متابعين.</span>'
+    by_platform = {str(row.get("platform")): row for row in rows}
+    ordered = [by_platform[name] for name in _PLATFORM_ORDER if name in by_platform]
+    ordered += [row for row in rows if row.get("platform") not in _PLATFORM_ORDER]
+    parts = []
+    for row in ordered:
+        name = _esc(PLATFORM_AR.get(str(row.get("platform")), str(row.get("platform"))))
+        delta = row.get("delta")
+        if delta is None or row.get("followers") is None:
+            change = "جديد"
+        else:
+            change = _fmt_signed_int(int(delta))
+        parts.append(f"{name} {_ltr(_fmt_int(row.get('followers')))} ({_ltr(change)})")
+    return " · ".join(parts)
+
+
+def _standing_line(board: Sequence[dict[str, Any]]) -> str:
+    window = _comparison_window(board)
+    if not window:
+        return f'<span style="color:{STONE}">لا توجد مقارنة.</span>'
+    ours = next((row for row in window if row.get("owned")), None)
+    above = [row for row in window if ours and int(row.get("followers") or 0) > int(ours.get("followers") or 0)]
+    below = [row for row in window if ours and int(row.get("followers") or 0) < int(ours.get("followers") or 0)]
+    names = " · ".join(
+        f"{_esc(row.get('name'))} {_ltr(_fmt_int(row.get('followers')))}"
+        + (" (حساباتنا)" if row.get("owned") else "")
+        for row in window
+    )
+    note = ""
+    if ours and above:
+        gap = int(above[-1]["followers"]) - int(ours["followers"])
+        note = f"يفصلنا عن {_esc(above[-1].get('name'))} {_ltr(_fmt_int(gap))} متابعاً"
+    if ours and below:
+        lead = int(ours["followers"]) - int(below[0]["followers"])
+        lead_text = f"ونتقدم على {_esc(below[0].get('name'))} بـ {_ltr(_fmt_int(lead))}"
+        note = f"{note}، {lead_text}" if note else lead_text
+    extra = f'<div style="color:{STONE};margin-top:4px">{note}.</div>' if note else ""
+    return f"<div>{names}</div>{extra}"
+
+
+def _comment_lines(comments: Sequence[dict[str, Any]], top_negative: Sequence[dict[str, Any]]) -> str:
+    positive = _top_comments(comments, "Positive", limit=1)
+    negative = _top_comments(comments, "Negative", limit=1) or _top_comments(top_negative, "Negative", limit=1)
+    if negative:
+        second_title, second_rows = "سلبي", negative
+    else:
+        second_title, second_rows = "محايد", _top_comments(comments, "Neutral", limit=1)
+    blocks = [("إيجابي", positive), (second_title, second_rows)]
+    lines = []
+    for title, rows in blocks:
+        text = _esc(str(rows[0].get("text") or "")[:120]) if rows else "لا يوجد"
+        lines.append(f'<div style="margin:0 0 4px;font-size:14px"><b>{title}:</b> {text}</div>')
+    return (
+        f'<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">التعليقات</div>'
+        + "".join(lines)
+    )
+
+
+def _edge_path() -> Path | None:
+    candidates = (
+        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+    )
+    return next((path for path in candidates if path.exists()), None)
+
+
+def html_to_pdf(page: str) -> bytes | None:
+    """Print the full briefing to a PDF the inbox can download. None if that fails."""
+    edge = _edge_path()
+    if edge is None:
+        return None
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        html_path = root / "report.html"
+        pdf_path = root / "report.pdf"
+        html_path.write_text(page, encoding="utf-8")
+        try:
+            subprocess.run(
+                [
+                    str(edge),
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--no-pdf-header-footer",
+                    f"--print-to-pdf={pdf_path}",
+                    html_path.as_uri(),
+                ],
+                check=True,
+                timeout=60,
+                capture_output=True,
+            )
+        except (subprocess.SubprocessError, OSError):
+            log.exception("Could not build the PDF report")
+            return None
+        if not pdf_path.exists() or pdf_path.stat().st_size < 1000:
+            return None
+        return pdf_path.read_bytes()
+
+
+def report_file(page: str) -> tuple[str, bytes, str]:
+    """The downloadable report: a PDF when Edge can print one, otherwise the HTML."""
+    pdf = html_to_pdf(page)
+    if pdf:
+        return "aljouf-weekly-report.pdf", pdf, "pdf"
+    return "aljouf-weekly-report.html", page.encode("utf-8"), "html"
+
+
+def _section(title: str) -> str:
+    return f"""
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:26px 0 12px">
+      <tr>
+        <td width="22%"><div style="border-top:2px solid {GOLD};line-height:0;font-size:0">&nbsp;</div></td>
+        <td style="white-space:nowrap;padding:0 14px;color:{OLIVE};font-size:18px;font-weight:700;text-align:center">{_esc(title)}</td>
+        <td width="22%"><div style="border-top:2px solid {GOLD};line-height:0;font-size:0">&nbsp;</div></td>
+      </tr>
+    </table>"""
+
+
+def _stat_tile(value: str, label: str, background: str, color: str = WHITE) -> str:
+    return f"""
+    <td width="25%" valign="middle" style="background:{background};border-radius:16px;padding:16px 8px;text-align:center">
+      <div style="font-size:30px;line-height:1.1;font-weight:700;color:{color}">{value}</div>
+      <div style="font-size:12px;line-height:1.4;color:{color};margin-top:4px">{_esc(label)}</div>
+    </td>"""
 
 
 class WeeklyMailer:
@@ -56,7 +533,6 @@ class WeeklyMailer:
     def enabled(self) -> bool:
         return self.config.secrets.smtp_ready and bool(self.config.recipients)
 
-    # -- rendering -------------------------------------------------------- #
     def render_html(
         self,
         summary: RunSummary,
@@ -64,237 +540,233 @@ class WeeklyMailer:
         top_negative: Sequence[dict[str, Any]],
         week_comments: Sequence[dict[str, Any]],
         week_news: Sequence[dict[str, Any]],
-    ) -> str:
-        cfg = self.config.settings
-        report_days = cfg.windows.comments_scrape_days
+        ranking: Sequence[dict[str, Any]] = (),
+        outside_news: Sequence[dict[str, Any]] = (),
+    ) -> tuple[str, dict[str, bytes]]:
+        days = self.config.settings.windows.comments_scrape_days
         sentiment = summary.sentiment_counts
-        total_scored = sum(sentiment.values()) or 1
-
+        positive = int(sentiment.get("Positive", 0))
+        negative = int(sentiment.get("Negative", 0))
+        neutral = int(sentiment.get("Neutral", 0))
+        scored = positive + negative + neutral
+        extra = _extra_followers(owned_followers)
         follower_total = sum(
-            int(row["followers"])
-            for row in owned_followers
-            if row.get("followers") is not None
+            int(row["followers"]) for row in owned_followers if row.get("followers") is not None
         )
-        follower_rows = "\n".join(
-            f"""
-            <tr>
-              <td style="{_TD}">{_esc(PLATFORM_AR.get(row['platform'], row['platform']))}</td>
-              <td style="{_TD}"><strong>{_fmt_int(row.get('followers'))}</strong></td>
-              <td style="{_TD}">{_fmt_delta(row.get('delta'))}</td>
-            </tr>"""
-            for row in owned_followers
-        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد بيانات متابعين.</td></tr>'
-
-        sentiment_rows = "\n".join(
-            f"""
-            <tr>
-              <td style="{_TD}">
-                <span style="color:{LABEL_COLORS.get(label, '#333')};font-weight:700">
-                  {_esc(SENTIMENT_AR.get(label, label))}
-                </span>
-              </td>
-              <td style="{_TD}">{count:,}</td>
-              <td style="{_TD}">{count / total_scored * 100:.0f}%</td>
-            </tr>"""
-            for label, count in sorted(
-                sentiment.items(), key=lambda kv: kv[1], reverse=True
-            )
-        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد تعليقات محللة.</td></tr>'
-
-        negative_rows = "\n".join(
-            f"""
-            <tr>
-              <td style="{_TD}">{_esc(PLATFORM_AR.get(row.get('platform'), row.get('platform')))}</td>
-              <td style="{_TD}">{_esc(str(row.get('text') or '')[:220])}</td>
-              <td style="{_TD};color:#c0392b">{_esc(row.get('reason_ar'))}</td>
-            </tr>"""
-            for row in top_negative
-        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد تعليقات سلبية هذا الأسبوع. 🎉</td></tr>'
-
-        comment_rows = "\n".join(
-            f"""
-            <tr>
-              <td style="{_TD}">{_esc(PLATFORM_AR.get(row.get('platform'), row.get('platform')))}</td>
-              <td style="{_TD}">{_esc(str(row.get('text') or '')[:300])}</td>
-              <td style="{_TD};color:{LABEL_COLORS.get(str(row.get('label')), '#333')};font-weight:700">
-                {_esc(SENTIMENT_AR.get(str(row.get('label') or ''), row.get('label') or '—'))}
-              </td>
-            </tr>"""
-            for row in list(week_comments)[:40]
-        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد تعليقات خلال آخر {report_days} أيام.</td></tr>'
-
-        news_counts: dict[str, int] = {}
-        for row in week_news:
-            for keyword in str(row.get("keyword") or "").split(","):
-                key = keyword.strip()
-                if key:
-                    news_counts[key] = news_counts.get(key, 0) + 1
-        keyword_chips = " ".join(
-            f'<span style="display:inline-block;background:#eef3f8;border-radius:12px;'
-            f'padding:3px 10px;margin:2px;font-size:13px">{_esc(k)}: {v}</span>'
-            for k, v in sorted(news_counts.items(), key=lambda kv: -kv[1])
-        ) or "لا توجد أخبار."
-
-        ranked_news = sorted(
-            week_news,
-            key=lambda row: row.get("published_at") or "",
-            reverse=True,
-        )
-        ranked_news.sort(key=lambda row: _is_national_news(str(row.get("keyword") or "")))
-        shown_news = ranked_news[:25]
-        hidden_news = len(ranked_news) - len(shown_news)
-        news_rows = "\n".join(
-            f"""
-            <tr>
-              <td style="{_TD}"><a href="{_esc(row.get('url'))}" style="color:#0b5d4a">{_esc(row.get('title'))}</a></td>
-              <td style="{_TD}">{_esc(row.get('source') or row.get('domain'))}</td>
-              <td style="{_TD}">{_esc(str(row.get('published_at') or '')[:10])}</td>
-            </tr>"""
-            for row in shown_news
-        ) or f'<tr><td style="{_TD}" colspan="3">لا توجد أخبار خلال آخر {report_days} أيام.</td></tr>'
-        news_more = (
-            f'<p style="margin:8px 0 0;font-size:13px;color:#7f8c8d">و{hidden_news} خبراً آخر على لوحة المعلومات.</p>'
-            if hidden_news
-            else ""
+        images: dict[str, bytes] = {}
+        now = datetime.now(_RIYADH)
+        stamp = (
+            f"{_WEEKDAYS[now.weekday()]} {now.day} {_MONTHS[now.month - 1]} {now.year}"
+            f" · {_ltr(now.strftime('%H:%M'))}"
         )
 
-        errors_block = ""
-        if summary.errors:
-            items = "\n".join(
-                f"<li>{_esc(e)}</li>" for e in summary.errors[:12]
-            )
-            extra = (
-                f"<li>… و{len(summary.errors) - 12} تحذيراً آخر</li>"
-                if len(summary.errors) > 12
-                else ""
-            )
-            errors_block = f"""
-            <div style="margin-top:18px;padding:12px 16px;background:#fff8e1;
-                        border-right:4px solid #f0ad4e;border-radius:6px">
-              <strong>تحذيرات التشغيل ({len(summary.errors)})</strong>
-              <ul style="margin:8px 0 0;padding-right:20px;font-size:13px;color:#8a6d3b">
-                {items}{extra}
-              </ul>
-            </div>"""
-
+        news_cards = self._news_cards(_select_news(week_news, outside_news or None))
+        platform_block = self._platforms(owned_followers)
+        comment_block = self._comment_sections(week_comments, top_negative, days)
+        comparison_block = self._comparison(ranking)
         dashboard_url = _esc(self.config.dashboard_url)
-        finished = summary.finished_at or summary.started_at
 
-        return f"""<!DOCTYPE html>
+        body = f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f6f8;
-             font-family:'Segoe UI',Tahoma,Arial,sans-serif;direction:rtl;text-align:right">
-  <div style="max-width:720px;margin:0 auto;padding:24px">
-
-    <div style="background:linear-gradient(135deg,#0b5d4a,#118a6e);color:#fff;
-                border-radius:10px 10px 0 0;padding:24px">
-      <h1 style="margin:0;font-size:22px">تقرير وسائل التواصل الاجتماعي</h1>
-      <p style="margin:6px 0 0;opacity:.9;font-size:14px">
-        المكتب الاستراتيجي لتطوير منطقة الجوف ·
-        {_esc(finished.strftime('%Y-%m-%d %H:%M'))} UTC
-      </p>
-    </div>
-
-    <div style="background:#fff;padding:24px;border-radius:0 0 10px 10px">
-
-      <table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-bottom:8px">
-        <tr>
-          {_stat_cell('المتابعون عبر المنصات', follower_total)}
-          {_stat_cell('أخبار ورصد', len(week_news))}
-          {_stat_cell('تعليقات', len(week_comments))}
-          {_stat_cell('تم تحليلها', summary.comments_analyzed)}
-        </tr>
+<body style="margin:0;padding:0;background:{PAPER};font-family:Tahoma,'Segoe UI',Arial,sans-serif;direction:rtl;text-align:right;color:{INK}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{PAPER}">
+    <tr><td align="center" style="padding:18px 12px 28px">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px;background:{CREAM};border-radius:18px;overflow:hidden">
+        <tr><td style="background:{OLIVE};padding:28px 28px 22px;text-align:center">
+          <div style="letter-spacing:8px;color:{GOLD};font-size:11px">◆ ◆ ◆</div>
+          <div style="margin-top:8px;color:#f0d9b1;font-size:13px">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
+          <div style="margin-top:4px;color:{WHITE};font-size:28px;font-weight:700;line-height:1.35">التقرير الأسبوعي</div>
+          <div style="color:{CREAM};font-size:15px">وسائل التواصل الاجتماعي</div>
+        </td></tr>
+        <tr><td style="background:{OLIVE_DARK};color:{CREAM};text-align:center;padding:9px 16px;font-size:13px">
+          آخر {_ltr(str(days))} أيام · {stamp}
+        </td></tr>
+        <tr><td style="padding:8px 22px 26px">
+          {_section("أبرز الأخبار")}
+          {news_cards}
+          {_section("ملخص الأسبوع")}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="8">
+            <tr>
+              <td valign="middle" style="background:{WHITE};border-radius:16px;padding:16px 12px;text-align:center;border:1px solid #eadfca">
+                <div style="font-size:28px;font-weight:700;color:{OLIVE};line-height:1">{_ltr(_share(positive, scored))}</div>
+                <div style="font-size:12px;color:{STONE};margin-bottom:8px">نسبة التعليقات الإيجابية</div>
+                <div style="font-size:28px;font-weight:700;color:{RED};line-height:1">{_ltr(_share(negative, scored))}</div>
+                <div style="font-size:12px;color:{STONE}">نسبة التعليقات السلبية</div>
+                <div style="font-size:12px;color:{LAVENDER};margin-top:8px">محايد {_ltr(_share(neutral, scored))}</div>
+              </td>
+            </tr>
+          </table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="margin-top:2px">
+            <tr>
+              {_stat_tile(_ltr(_fmt_int(follower_total)), "إجمالي المتابعين", OLIVE)}
+              {_stat_tile(_ltr(_fmt_signed_int(extra)), "متابعون إضافيون", GOLD, INK)}
+              {_stat_tile(_ltr(_fmt_int(len(week_comments))), "عدد التعليقات", LAVENDER)}
+              {_stat_tile(_ltr(_fmt_int(len(week_news))), "أخبار الأسبوع", OLIVE_DARK)}
+            </tr>
+          </table>
+          {_section("المتابعون")}
+          {platform_block}
+          {comparison_block}
+          {comment_block}
+          <p style="text-align:center;margin:26px 0 8px">
+            <span style="display:inline-block;background:{GOLD};color:{INK};padding:12px 22px;border-radius:8px;font-weight:700;font-size:15px">تحميل التقرير</span>
+            <a href="{dashboard_url}" style="display:inline-block;background:{OLIVE};color:{WHITE};text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;font-size:15px;margin-right:8px">لوحة المعلومات</a>
+          </p>
+          <p style="text-align:center;margin:0;font-size:11px;color:{STONE}">
+            تقرير آلي · التشغيل رقم {summary.run_id}
+          </p>
+        </td></tr>
       </table>
-
-      <p style="text-align:center;margin:22px 0">
-        <a href="{dashboard_url}"
-           style="display:inline-block;background:#118a6e;color:#fff;text-decoration:none;
-                  padding:13px 34px;border-radius:7px;font-weight:700;font-size:16px">
-          عرض لوحة المعلومات التفاعلية
-        </a>
-      </p>
-      <p style="text-align:center;margin:-12px 0 24px;font-size:12px;color:#7f8c8d">
-        <a href="{dashboard_url}" style="color:#7f8c8d">{dashboard_url}</a>
-      </p>
-
-      <h2 style="{_H2}">متابعو حساباتنا</h2>
-      <table style="{_TABLE}">
-        <thead><tr>
-          <th style="{_TH}">المنصة</th><th style="{_TH}">المتابعون</th>
-          <th style="{_TH}">التغير عن الأسبوع الماضي</th>
-        </tr></thead>
-        <tbody>{follower_rows}</tbody>
-      </table>
-
-      <h2 style="{_H2}">تحليل مشاعر التعليقات (آخر {report_days} أيام)</h2>
-      <table style="{_TABLE}">
-        <thead><tr>
-          <th style="{_TH}">التصنيف</th><th style="{_TH}">العدد</th><th style="{_TH}">النسبة</th>
-        </tr></thead>
-        <tbody>{sentiment_rows}</tbody>
-      </table>
-
-      <h2 style="{_H2}">تعليقات آخر {report_days} أيام</h2>
-      <table style="{_TABLE}">
-        <thead><tr>
-          <th style="{_TH}">المنصة</th><th style="{_TH}">التعليق</th><th style="{_TH}">التصنيف</th>
-        </tr></thead>
-        <tbody>{comment_rows}</tbody>
-      </table>
-
-      <h2 style="{_H2}">تعليقات سلبية تحتاج مراجعة</h2>
-      <table style="{_TABLE}">
-        <thead><tr>
-          <th style="{_TH}">المنصة</th><th style="{_TH}">التعليق</th><th style="{_TH}">السبب</th>
-        </tr></thead>
-        <tbody>{negative_rows}</tbody>
-      </table>
-
-      <h2 style="{_H2}">الأخبار ذات الصلة (آخر {report_days} أيام)</h2>
-      <p style="margin:0 0 12px">{keyword_chips}</p>
-      <table style="{_TABLE}">
-        <thead><tr>
-          <th style="{_TH}">العنوان</th><th style="{_TH}">المصدر</th><th style="{_TH}">التاريخ</th>
-        </tr></thead>
-        <tbody>{news_rows}</tbody>
-      </table>
-      {news_more}
-
-      {errors_block}
-
-      <hr style="border:0;border-top:1px solid #eceff1;margin:24px 0 14px">
-      <p style="margin:0;font-size:12px;color:#95a5a6">
-        تقرير آلي · التشغيل رقم {summary.run_id} ·
-        استغرق {summary.duration_secs:.0f} ثانية ·
-        البيانات مجمّعة من مصادر عامة دون استخدام حسابات إدارية.
-      </p>
-    </div>
-  </div>
+    </td></tr>
+  </table>
 </body>
 </html>"""
+        return body, images
+
+    def render_brief(
+        self,
+        summary: RunSummary,
+        owned_followers: Sequence[dict[str, Any]],
+        top_negative: Sequence[dict[str, Any]],
+        week_comments: Sequence[dict[str, Any]],
+        week_news: Sequence[dict[str, Any]],
+        ranking: Sequence[dict[str, Any]] = (),
+        outside_news: Sequence[dict[str, Any]] = (),
+        download_href: str = "",
+        download_name: str = "aljouf-weekly-report.pdf",
+    ) -> str:
+        """A short note Gmail can show in one view, with a link to the full report."""
+        days = self.config.settings.windows.comments_scrape_days
+        sentiment = summary.sentiment_counts
+        positive = int(sentiment.get("Positive", 0))
+        negative = int(sentiment.get("Negative", 0))
+        neutral = int(sentiment.get("Neutral", 0))
+        scored = positive + negative + neutral
+        extra = _extra_followers(owned_followers)
+        follower_total = sum(
+            int(row["followers"]) for row in owned_followers if row.get("followers") is not None
+        )
+        now = datetime.now(_RIYADH)
+        stamp = (
+            f"{_WEEKDAYS[now.weekday()]} {now.day} {_MONTHS[now.month - 1]} {now.year}"
+        )
+        news = _select_news(week_news, outside_news or None)
+        style = (
+            f"display:inline-block;background:{GOLD};color:{INK};text-decoration:none;"
+            f"padding:10px 18px;border-radius:8px;font-weight:700;font-size:15px"
+        )
+        if download_href:
+            download = f'<a href="{_esc(download_href)}" style="{style}">تحميل التقرير</a>'
+            download_note = ""
+        else:
+            download = f'<span style="{style}">تحميل التقرير</span>'
+            download_note = (
+                f'<div style="font-size:12px;color:{STONE};margin-top:6px">الملف {_ltr(download_name)} مرفق مع الرسالة</div>'
+            )
+        dashboard = (
+            f'<a href="{_esc(self.config.dashboard_url)}" style="display:inline-block;background:{OLIVE};'
+            f'color:{WHITE};text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700;font-size:15px">'
+            f"لوحة المعلومات</a>"
+        )
+        return f"""<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;background:{PAPER};font-family:Tahoma,Arial,sans-serif;color:{INK}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{OLIVE};color:{WHITE};text-align:center">
+<tr><td style="padding:18px 16px">
+<div style="font-size:13px;color:#f0d9b1">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
+<div style="font-size:24px;font-weight:700;margin-top:4px">التقرير الأسبوعي</div>
+<div style="font-size:13px;margin-top:4px">آخر {_ltr(str(days))} أيام · {stamp}</div>
+</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:14px 16px 18px">
+<div style="text-align:center;margin:0 0 14px">{download} {dashboard}{download_note}</div>
+<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:0 0 8px">أبرز الأخبار</div>
+{_news_lines(news)}
+<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">ملخص الأسبوع</div>
+<div style="background:{WHITE};border:1px solid #eadfca;border-radius:12px;padding:12px;text-align:center">
+<div style="font-size:22px;font-weight:700;color:{OLIVE}">{_ltr(_share(positive, scored))} <span style="font-size:13px;font-weight:400;color:{STONE}">إيجابية</span></div>
+<div style="font-size:22px;font-weight:700;color:{RED};margin-top:4px">{_ltr(_share(negative, scored))} <span style="font-size:13px;font-weight:400;color:{STONE}">سلبية</span>
+<span style="font-size:13px;color:{LAVENDER};font-weight:400"> · محايد {_ltr(_share(neutral, scored))}</span></div>
+<div style="margin-top:8px;font-size:15px">{_ltr(_fmt_int(follower_total))} متابع · {_ltr(_fmt_signed_int(extra))} إضافيون · {_ltr(_fmt_int(len(week_comments)))} تعليقات</div>
+</div>
+<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">المتابعون</div>
+<div style="font-size:14px;line-height:1.6">{_platform_line(owned_followers)}</div>
+<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">موقفنا بين المكاتب</div>
+<div style="font-size:14px;line-height:1.6">{_standing_line(ranking)}</div>
+{_comment_lines(week_comments, top_negative)}
+<div style="text-align:center;margin-top:16px;font-size:11px;color:{STONE}">تقرير آلي · التشغيل رقم {summary.run_id}</div>
+</td></tr></table>
+</body></html>"""
 
     def render_text(self, summary: RunSummary, follower_total: int | None = None) -> str:
-        sentiment = " | ".join(
-            f"{SENTIMENT_AR.get(k, k)}: {v}" for k, v in summary.sentiment_counts.items()
-        ) or "لا توجد تعليقات محللة"
+        sentiment = summary.sentiment_counts
+        scored = sum(sentiment.values())
+        positive = _share(int(sentiment.get("Positive", 0)), scored)
+        negative = _share(int(sentiment.get("Negative", 0)), scored)
         total = summary.followers_collected if follower_total is None else follower_total
         return (
-            "تقرير وسائل التواصل الاجتماعي - المكتب الاستراتيجي لتطوير منطقة الجوف\n"
+            "التقرير الأسبوعي - المكتب الاستراتيجي لتطوير منطقة الجوف\n"
             f"التشغيل رقم: {summary.run_id}\n"
-            f"المتابعون عبر المنصات: {total:,} "
-            f"(تعذر: {summary.followers_failed})\n"
-            f"أخبار: {summary.news_collected}\n"
-            f"تعليقات: {summary.comments_collected} "
-            f"(تم تحليل {summary.comments_analyzed})\n"
-            f"المشاعر: {sentiment}\n"
-            f"تحذيرات: {len(summary.errors)}\n\n"
+            f"المتابعون: {total:,}\n"
+            f"التعليقات الإيجابية: {positive}\n"
+            f"التعليقات السلبية: {negative}\n"
             f"لوحة المعلومات: {self.config.dashboard_url}\n"
         )
 
-    # -- sending ---------------------------------------------------------- #
+    def build_message(
+        self,
+        summary: RunSummary,
+        html_body: str,
+        follower_total: int | None = None,
+        images: dict[str, bytes] | None = None,
+        report_name: str | None = None,
+        report_bytes: bytes | None = None,
+        report_subtype: str = "html",
+    ) -> EmailMessage:
+        secrets = self.config.secrets
+        recipients = self.config.recipients
+        message = EmailMessage(policy=SMTP.clone(utf8=True))
+        message["Subject"] = (
+            f"{self.config.settings.email.subject_prefix} · "
+            f"{datetime.now(_RIYADH).strftime('%Y-%m-%d %H:%M')}"
+        )
+        message["From"] = secrets.email_from or formataddr(
+            ("JSDO Social Reporting", secrets.smtp_username or "")
+        )
+        message["To"] = ", ".join(recipients)
+        message["Date"] = formatdate(localtime=True)
+        message.set_content(self.render_text(summary, follower_total))
+        message.add_alternative(html_body, subtype="html")
+        html_part = message.get_payload()[-1]
+        for cid, payload in (images or {}).items():
+            html_part.add_related(
+                payload,
+                maintype="image",
+                subtype="png",
+                cid=f"<{cid}>",
+                disposition="inline",
+                filename=f"{cid}.png",
+            )
+        if report_name and report_bytes:
+            maintype = "application" if report_subtype == "pdf" else "text"
+            message.add_attachment(
+                report_bytes,
+                maintype=maintype,
+                subtype=report_subtype,
+                filename=report_name,
+            )
+        return message
+
     def send(
-        self, summary: RunSummary, html_body: str, follower_total: int | None = None
+        self,
+        summary: RunSummary,
+        html_body: str,
+        follower_total: int | None = None,
+        images: dict[str, bytes] | None = None,
+        report_name: str | None = None,
+        report_bytes: bytes | None = None,
+        report_subtype: str = "html",
     ) -> list[str]:
         if not self.enabled:
             reason = (
@@ -307,19 +779,15 @@ class WeeklyMailer:
 
         secrets = self.config.secrets
         recipients = self.config.recipients
-
-        message = EmailMessage()
-        message["Subject"] = (
-            f"{self.config.settings.email.subject_prefix} · "
-            f"{datetime.now().strftime('%Y-%m-%d')}"
+        message = self.build_message(
+            summary,
+            html_body,
+            follower_total,
+            images,
+            report_name,
+            report_bytes,
+            report_subtype,
         )
-        message["From"] = secrets.email_from or formataddr(
-            ("JSDO Social Reporting", secrets.smtp_username or "")
-        )
-        message["To"] = ", ".join(recipients)
-        message["Date"] = formatdate(localtime=True)
-        message.set_content(self.render_text(summary, follower_total))
-        message.add_alternative(html_body, subtype="html")
 
         try:
             if secrets.smtp_port == 465:
@@ -341,24 +809,232 @@ class WeeklyMailer:
         log.info("Email sent to %s", ", ".join(recipients))
         return recipients
 
+    def _charts(
+        self,
+        positive: int,
+        neutral: int,
+        negative: int,
+        followers: Sequence[dict[str, Any]],
+        extra: int | None,
+    ) -> dict[str, bytes]:
+        try:
+            groups = {"up": 0, "down": 0, "flat": 0, "new": 0}
+            for row in followers:
+                percent = _change_percent(row)
+                if percent is None:
+                    groups["new"] += 1
+                elif percent > 0.05:
+                    groups["up"] += 1
+                elif percent < -0.05:
+                    groups["down"] += 1
+                else:
+                    groups["flat"] += 1
+            extra_color = "red" if extra is not None and extra < 0 else "olive"
+            return {
+                "sentiment": _donut(
+                    [(positive, "olive"), (neutral, "lavender"), (negative, "red")],
+                    _share(positive, positive + neutral + negative),
+                    "olive",
+                ),
+                "followers": _donut(
+                    [
+                        (groups["up"], "olive"),
+                        (groups["flat"], "sand"),
+                        (groups["down"], "red"),
+                        (groups["new"], "lavender"),
+                    ],
+                    _fmt_signed_int(extra),
+                    extra_color,
+                ),
+            }
+        except Exception:  # noqa: BLE001 - the briefing still sends without the pictures
+            log.exception("Report charts could not be drawn")
+            return {}
 
-# Inline styles: email clients strip <style> blocks, so every rule is inline.
-_TABLE = (
-    "width:100%;border-collapse:collapse;margin:0 0 20px;font-size:14px;direction:rtl"
-)
-_TH = (
-    "text-align:right;padding:9px 10px;background:#f4f6f8;border-bottom:2px solid #dfe4e8;"
-    "font-weight:700;color:#37474f"
-)
-_TD = "text-align:right;padding:9px 10px;border-bottom:1px solid #eceff1;color:#37474f"
-_H2 = "font-size:16px;color:#0b5d4a;margin:22px 0 10px;padding-bottom:6px;border-bottom:2px solid #e8f5e9"
+    def _news_cards(self, rows: Sequence[dict[str, Any]]) -> str:
+        if not rows:
+            return f'<p style="margin:0;color:{STONE}">لا توجد أخبار خلال هذه الفترة.</p>'
+        cards = []
+        for index, row in enumerate(rows, start=1):
+            title = _esc(row.get("title"))
+            url = _esc(row.get("url"))
+            source = _esc(row.get("source") or row.get("domain") or "")
+            published = _esc(str(row.get("published_at") or "")[:10])
+            link = f'<a href="{url}" style="color:{INK};text-decoration:none">{title}</a>' if url else title
+            badge = _esc(_news_badge(row))
+            cards.append(
+                f"""
+                <table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0" style="background:{WHITE};border:1px solid #eadfca;border-radius:12px;margin:0 0 8px">
+                  <tr>
+                    <td width="42" valign="middle" style="text-align:center;color:{GOLD};font-size:22px;font-weight:700">{_ltr(str(index))}</td>
+                    <td valign="middle" style="padding:12px 4px 12px 12px">
+                      <div style="font-size:15px;font-weight:700;line-height:1.5">{link}</div>
+                      <div style="font-size:12px;color:{STONE};margin-top:3px">{badge} · {source} · {published}</div>
+                    </td>
+                    <td width="7" bgcolor="{OLIVE}"></td>
+                  </tr>
+                </table>"""
+            )
+        return "\n".join(cards)
+
+    def _platforms(self, rows: Sequence[dict[str, Any]]) -> str:
+        if not rows:
+            return f'<p style="margin:0;color:{STONE}">لا توجد بيانات متابعين.</p>'
+        by_platform = {str(row.get("platform")): row for row in rows}
+        ordered = [by_platform[name] for name in _PLATFORM_ORDER if name in by_platform]
+        ordered += [row for row in rows if row.get("platform") not in _PLATFORM_ORDER]
+        highest = max((int(row["followers"]) for row in ordered if row.get("followers") is not None), default=1) or 1
+        cards = []
+        bars = []
+        for row in ordered:
+            name = _esc(PLATFORM_AR.get(str(row.get("platform")), str(row.get("platform"))))
+            delta = row.get("delta")
+            if delta is None or row.get("followers") is None:
+                change = f'<span style="color:{LAVENDER}">جديد</span>'
+                bar_color = LAVENDER
+            elif int(delta) < 0:
+                change = f'<span style="color:{RED}">▼ {_ltr(_fmt_signed_int(int(delta)))}</span>'
+                bar_color = RED
+            elif int(delta) > 0:
+                change = f'<span style="color:{OLIVE}">▲ {_ltr(_fmt_signed_int(int(delta)))}</span>'
+                bar_color = OLIVE
+            else:
+                change = f'<span style="color:{STONE}">{_ltr("0")}</span>'
+                bar_color = OLIVE
+            cards.append(
+                f"""
+                <td width="25%" valign="top" style="background:{WHITE};border:1px solid #eadfca;border-radius:14px;padding:12px 6px;text-align:center">
+                  <div style="font-size:12px;color:{STONE}">{name}</div>
+                  <div style="font-size:22px;font-weight:700;color:{INK};margin:4px 0">{_ltr(_fmt_int(row.get('followers')))}</div>
+                  <div style="font-size:14px;font-weight:700">{change}</div>
+                </td>"""
+            )
+            width = 0
+            if row.get("followers") is not None and int(row["followers"]) > 0:
+                width = max(4, round(int(row["followers"]) / highest * 100))
+            rest = 100 - width
+            bars.append(
+                f"""
+                <tr>
+                  <td width="88" style="font-size:12px;color:{STONE};padding:6px 0">{name}</td>
+                  <td width="58" style="font-size:12px;font-weight:700;color:{INK};padding:6px 8px 6px 0">{_ltr(_fmt_int(row.get('followers')))}</td>
+                  <td style="padding:6px 0">
+                    <table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td width="{width}%" bgcolor="{bar_color}" style="height:12px;border-radius:8px;font-size:1px;line-height:12px">&nbsp;</td>
+                        <td width="{rest}%"></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>"""
+            )
+        return f"""
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>{''.join(cards)}</tr></table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">{''.join(bars)}</table>"""
+
+    def _comparison(self, board: Sequence[dict[str, Any]]) -> str:
+        window = _comparison_window(board)
+        if not window:
+            return ""
+        highest = max(int(row.get("followers") or 0) for row in window) or 1
+        ours = next((row for row in window if row.get("owned")), None)
+        above = [row for row in window if ours and int(row.get("followers") or 0) > int(ours.get("followers") or 0)]
+        below = [row for row in window if ours and int(row.get("followers") or 0) < int(ours.get("followers") or 0)]
+        note = ""
+        if ours and above:
+            gap = int(above[-1]["followers"]) - int(ours["followers"])
+            note = f"يفصلنا عن {_esc(above[-1].get('name'))} {_ltr(_fmt_int(gap))} متابعاً"
+        if ours and below:
+            lead = int(ours["followers"]) - int(below[0]["followers"])
+            lead_text = f"ونتقدم على {_esc(below[0].get('name'))} بـ {_ltr(_fmt_int(lead))}"
+            note = f"{note}، {lead_text}" if note else lead_text
+        rows = []
+        for row in window:
+            owned = bool(row.get("owned"))
+            followers = int(row.get("followers") or 0)
+            width = max(6, round(followers / highest * 100))
+            rows.append(
+                f"""
+                <tr>
+                  <td style="padding:7px 0;font-size:13px;font-weight:{'700' if owned else '400'};color:{INK}">{_esc(row.get('name'))}</td>
+                  <td width="72" style="padding:7px 8px;font-size:13px;font-weight:700;color:{INK}">{_ltr(_fmt_int(followers))}</td>
+                  <td style="padding:7px 0">
+                    <table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td width="{width}%" bgcolor="{OLIVE if owned else GOLD}" style="height:14px;border-radius:8px;font-size:1px">&nbsp;</td>
+                        <td></td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td width="58" style="font-size:11px;color:{OLIVE};font-weight:700">{'حساباتنا' if owned else ''}</td>
+                </tr>"""
+            )
+        caption = f'<p style="margin:8px 0 0;font-size:13px;color:{STONE}">{note}.</p>' if note else ""
+        return f"""
+        {_section("موقفنا بين المكاتب")}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{''.join(rows)}</table>
+        {caption}"""
+
+    def _comment_sections(
+        self,
+        comments: Sequence[dict[str, Any]],
+        top_negative: Sequence[dict[str, Any]],
+        days: int,
+    ) -> str:
+        positive = _top_comments(comments, "Positive")
+        negative = _top_comments(comments, "Negative") or _top_comments(top_negative, "Negative")
+        if negative:
+            second_title, second_color, second_rows = "التعليقات السلبية", RED, negative
+        else:
+            second_title, second_color, second_rows = (
+                "التعليقات المحايدة",
+                LAVENDER,
+                _top_comments(comments, "Neutral"),
+            )
+        return (
+            self._comment_group("التعليقات الإيجابية", positive, OLIVE, days)
+            + self._comment_group(second_title, second_rows, second_color, days)
+        )
+
+    def _comment_group(
+        self, title: str, rows: Sequence[dict[str, Any]], color: str, days: int
+    ) -> str:
+        if not rows:
+            empty_label = {
+                "التعليقات الإيجابية": "تعليقات إيجابية",
+                "التعليقات السلبية": "تعليقات سلبية",
+                "التعليقات المحايدة": "تعليقات محايدة",
+            }.get(title, "تعليقات")
+            empty = f"لا توجد {empty_label} خلال آخر {_ltr(str(days))} أيام."
+            body = (
+                f'<p style="margin:0;background:{WHITE};border:1px solid #eadfca;border-radius:12px;'
+                f'padding:12px 14px;color:{STONE}">{empty}</p>'
+            )
+        else:
+            cards = []
+            for row in rows:
+                platform = _esc(PLATFORM_AR.get(str(row.get("platform")), str(row.get("platform") or "")))
+                text = _esc(str(row.get("text") or "")[:180])
+                cards.append(
+                    f"""
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{WHITE};border:1px solid #eadfca;border-radius:12px;margin:0 0 8px">
+                      <tr>
+                        <td width="6" bgcolor="{color}"></td>
+                        <td style="padding:12px 14px">
+                          <div style="font-size:12px;color:{color};font-weight:700">{platform}</div>
+                          <div style="font-size:14px;line-height:1.55;color:{INK};margin-top:3px">{text}</div>
+                        </td>
+                      </tr>
+                    </table>"""
+                )
+            body = "".join(cards)
+        return f"{_section(title)}{body}"
 
 
-def _stat_cell(label: str, value: int) -> str:
+def _image(cid: str, images: dict[str, bytes], alt: str) -> str:
+    if cid not in images:
+        return ""
     return (
-        '<td style="background:#f4f8f7;border-radius:8px;padding:14px 8px;'
-        'text-align:center;width:25%">'
-        f'<div style="font-size:24px;font-weight:700;color:#0b5d4a">{value:,}</div>'
-        f'<div style="font-size:12px;color:#607d8b;margin-top:2px">{_esc(label)}</div>'
-        "</td>"
+        f'<img src="cid:{cid}" width="140" height="140" alt="{_esc(alt)}" '
+        f'style="display:block;margin:0 auto;border:0">'
     )

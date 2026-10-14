@@ -19,6 +19,9 @@ concurrency:
   group: weekly-report
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -26,6 +29,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - uses: actions/setup-python@v5
         with:
@@ -38,15 +43,8 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
-      # SQLite lives in the repo so follower history accumulates week over
-      # week. Swap this for cloud storage if you prefer not to commit data.
-      - name: Restore database
-        uses: actions/cache@v4
-        with:
-          path: data
-          key: aljouf-db-${{ github.run_id }}
-          restore-keys: |
-            aljouf-db-
+      # The database in the repo is what the public dashboard reads. Do not
+      # restore an Actions cache over it.
 
       - name: Run pipeline
         env:
@@ -60,10 +58,23 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
-          DASHBOARD_URL: ${{ vars.DASHBOARD_URL }}
+          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'wakeelsaleh@gmail.com' }}
+          DASHBOARD_URL: ${{ vars.DASHBOARD_URL != '' && vars.DASHBOARD_URL || 'https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/' }}
         run: |
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}
+
+      - name: Publish the updated database
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/aljouf.db
+          if git diff --cached --quiet; then
+            echo "Database unchanged."
+          else
+            git commit -m "Update the collected database after the weekly run."
+            git push
+          fi
 
       - name: Upload logs and database
         if: always()

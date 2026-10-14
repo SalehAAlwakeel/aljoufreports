@@ -10,6 +10,7 @@ paid credential is configured:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus, urlparse
@@ -79,6 +80,103 @@ def _domain(url: str) -> str:
         return ""
 
 
+# "اليوم" must match the Saudi paper exactly. A substring match also accepts
+# Egypt's اليوم السابع, which is how foreign stories were getting in.
+_EXACT_PUBLISHERS = {"اليوم"}
+_NATIONAL_MARKERS = ("السعود", "saudi")
+_REGION_MARKERS = ("الجوف", "al jouf", "al-jouf", "aljouf")
+_FOREIGN_JOUF = ("اليمن", "yemen", "ليبيا", "libya")
+
+
+def search_query(keyword: NewsKeyword, days: int) -> str:
+    """Google News query. Generic town names are tied to الجوف."""
+    text = keyword.query.strip()
+    if " " in text and not (text.startswith('"') and text.endswith('"')):
+        text = f'"{text}"'
+    folded = text.casefold()
+    if keyword.require_region and "الجوف" not in text and "al jouf" not in folded:
+        text = f"{text} الجوف"
+    return f"{text} when:{days}d"
+
+
+def _normalize(text: str) -> str:
+    """Fold case, Arabic letter variants, and hyphens so Al-Jouf matches Al Jouf."""
+    text = (text or "").casefold()
+    text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    text = text.replace("ة", "ه").replace("ى", "ي")
+    text = re.sub(r"[\u064b-\u0652\u0670\u0640]", "", text)
+    text = text.replace("-", " ").replace("–", " ").replace("—", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _has(text: str, needle: str) -> bool:
+    folded = _normalize(needle)
+    return bool(folded) and folded in _normalize(text)
+
+
+def _publisher_hit(source: str, domain: str, needle: str) -> bool:
+    source_f = _normalize(source)
+    domain_f = _normalize(domain)
+    needle_f = _normalize(needle)
+    if not needle_f:
+        return False
+    if needle_f in domain_f or source_f == needle_f:
+        return True
+    if needle_f in _EXACT_PUBLISHERS:
+        return False
+    if len(needle_f) <= 3:
+        return source_f.startswith(needle_f + " ") or source_f.endswith(" " + needle_f)
+    return needle_f in f"{source_f} {domain_f}"
+
+
+def matches_list(source: str, domain: str, names: list[str]) -> bool:
+    return any(_publisher_hit(source, domain, name) for name in names)
+
+
+def article_allowed(
+    *,
+    title: str,
+    source: str,
+    domain: str,
+    scope: str,
+    term: str,
+    require_region: bool,
+    trusted: list[str],
+    blocked: list[str],
+    local_terms: list[str] | None = None,
+) -> bool:
+    """Keep a headline only when a reputable outlet actually wrote about the place.
+
+    Local stories must name the town in the title. National stories must name
+    Saudi Arabia. Blocked outlets (لحظات نيوز) are dropped even when the title
+    matches, because they attach Al Jouf town names to unrelated world news.
+    """
+    if matches_list(source, domain, blocked):
+        return False
+    if not matches_list(source, domain, trusted):
+        return False
+
+    if scope == "national":
+        return any(_has(title, marker) for marker in _NATIONAL_MARKERS)
+
+    if not term or not _has(title, term):
+        return False
+    if require_region and not any(
+        _has(title, marker) for marker in (*_REGION_MARKERS, *_NATIONAL_MARKERS)
+    ):
+        return False
+    # الجوف is also a governorate in Yemen and a region in Libya.
+    if any(_has(title, marker) for marker in _FOREIGN_JOUF):
+        towns = [
+            name
+            for name in (local_terms or [])
+            if _normalize(name) not in {"الجوف", "al jouf"}
+        ]
+        if not any(_has(title, name) for name in towns):
+            return False
+    return True
+
+
 class NewsCollector:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -105,7 +203,9 @@ class NewsCollector:
             for keyword in self.config.settings.news.keywords:
                 if "google_news" in sources:
                     articles.extend(self._google_news(client, keyword))
-                if "gdelt" in sources:
+                # GDELT is paced at 10s per query. Town names are covered by
+                # Google News; GDELT is only used for national trending news.
+                if "gdelt" in sources and keyword.scope == "national":
                     articles.extend(self._gdelt(client, keyword))
 
         deduped = self._dedupe(articles)
@@ -123,7 +223,7 @@ class NewsCollector:
         import feedparser
 
         locale = LOCALES.get(keyword.language, LOCALES["en"])
-        query = f"{keyword.query} when:{self._lookback_days}d"
+        query = search_query(keyword, self._lookback_days)
         url = (
             f"{GOOGLE_NEWS_RSS}?q={quote_plus(query)}"
             f"&hl={locale['hl']}&gl={locale['gl']}&ceid={locale['ceid']}"
@@ -159,6 +259,9 @@ class NewsCollector:
                 source = (entry["source"].get("title") or "").strip()
             if source and title.endswith(f" - {source}"):
                 title = title[: -len(f" - {source}")]
+
+            if not self._allowed(keyword, title, source, _domain(link)):
+                continue
 
             articles.append(
                 NewsArticle(
@@ -212,6 +315,11 @@ class NewsCollector:
             if published and published < self._cutoff:
                 continue
 
+            source = entry.get("domain") or _domain(link)
+            domain = entry.get("domain") or _domain(link)
+            if not self._allowed(keyword, title, source, domain):
+                continue
+
             articles.append(
                 NewsArticle(
                     title=title,
@@ -219,8 +327,8 @@ class NewsCollector:
                     published_at=published,
                     # `sourcecountry` is the publisher's country, not its name;
                     # using it here labelled articles "India" or "Zimbabwe".
-                    source=entry.get("domain") or _domain(link),
-                    domain=entry.get("domain") or _domain(link),
+                    source=source,
+                    domain=domain,
                     keyword=keyword.label,
                     language=_language_code(entry.get("language"), keyword.language),
                     collector="gdelt",
@@ -277,6 +385,20 @@ class NewsCollector:
                 self.errors.append(msg)
                 return None
         return None
+
+    def _allowed(self, keyword: NewsKeyword, title: str, source: str, domain: str) -> bool:
+        news = self.config.settings.news
+        return article_allowed(
+            title=title,
+            source=source,
+            domain=domain,
+            scope=keyword.scope,
+            term=keyword.query,
+            require_region=keyword.require_region,
+            trusted=news.trusted_sources,
+            blocked=news.blocked_sources,
+            local_terms=[item.query for item in news.keywords if item.scope != "national"],
+        )
 
     # -- dedupe ----------------------------------------------------------- #
     @staticmethod

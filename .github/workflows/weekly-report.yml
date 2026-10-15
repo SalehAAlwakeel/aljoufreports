@@ -43,6 +43,11 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      - name: Install Chromium for the PDF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+
       # The database in the repo is what the public dashboard reads. Do not
       # restore an Actions cache over it.
 
@@ -58,7 +63,7 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'wakeelsaleh@gmail.com' }}
+          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'ajkattan@jsdo.gov.sa,wakeelsaleh@gmail.com,a.shuqair@jsdo.gov.sa' }}
           DASHBOARD_URL: ${{ vars.DASHBOARD_URL != '' && vars.DASHBOARD_URL || 'https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/' }}
         run: |
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}

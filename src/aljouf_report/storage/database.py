@@ -19,6 +19,15 @@ from ..models import (
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
+def _window_start(days: int) -> str:
+    """Start of the Riyadh day `days` ago, so a morning comment stays in all day."""
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("Asia/Riyadh"))
+    start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(timezone.utc).isoformat()
+
+
 def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -71,6 +80,53 @@ class Database:
                 "UPDATE runs SET finished_at = ?, status = ?, notes = ? WHERE id = ?",
                 (_iso(finished_at), status, notes, run_id),
             )
+
+    def save_post_likes(self, run_id: int, rows: Iterable[dict[str, Any]]) -> int:
+        payload = [
+            (
+                run_id,
+                row["entity_key"],
+                row["platform"],
+                row["post_url"],
+                _iso(row.get("published_at")) if isinstance(row.get("published_at"), datetime) else row.get("published_at"),
+                int(row.get("likes") or 0),
+                _iso(datetime.now(timezone.utc)),
+            )
+            for row in rows
+            if row.get("post_url")
+        ]
+        if not payload:
+            return 0
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO post_engagement (
+                    run_id, entity_key, platform, post_url, published_at, likes, fetched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (platform, post_url) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    likes = excluded.likes,
+                    published_at = COALESCE(excluded.published_at, post_engagement.published_at),
+                    fetched_at = excluded.fetched_at
+                """,
+                payload,
+            )
+        return len(payload)
+
+    def week_post_likes(self, days: int = 7) -> int | None:
+        """Likes on our posts published inside the report window. None if never collected."""
+        with self.connect() as conn:
+            stored = conn.execute("SELECT COUNT(*) AS n FROM post_engagement").fetchone()
+            if not stored or int(stored["n"]) == 0:
+                return None
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(likes), 0) AS n FROM post_engagement
+                WHERE published_at IS NOT NULL AND published_at >= ?
+                """,
+                (_window_start(days),),
+            ).fetchone()
+        return int(row["n"]) if row else 0
 
     def latest_run_id(self) -> int | None:
         with self.connect() as conn:
@@ -279,7 +335,7 @@ class Database:
         return len(rows)
 
     def scored_comments(self, days: int = 7) -> list[dict[str, Any]]:
-        cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
+        cutoff = _window_start(days)
         with self.connect() as conn:
             return [
                 dict(r)
@@ -294,7 +350,7 @@ class Database:
             ]
 
     def sentiment_counts(self, days: int = 7) -> dict[str, int]:
-        cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
+        cutoff = _window_start(days)
         with self.connect() as conn:
             rows = conn.execute(
                 """

@@ -26,7 +26,12 @@ for extra_path in (PROJECT_ROOT / "src", HERE):
         sys.path.insert(0, str(extra_path))
 
 from aljouf_report.config import load_config  # noqa: E402
-from aljouf_report.models import DEMO_MODEL_TAG, PLATFORM_AR, SENTIMENT_AR  # noqa: E402
+from aljouf_report.models import (  # noqa: E402
+    DEMO_MODEL_TAG,
+    OWNED_ONLY_PLATFORMS,
+    PLATFORM_AR,
+    SENTIMENT_AR,
+)
 from aljouf_report.notify.mailer import embed_images, insight_table  # noqa: E402
 from aljouf_report.storage import Database  # noqa: E402
 from theme import (  # noqa: E402
@@ -303,14 +308,18 @@ if is_demo:
 def owned_totals(df: pd.DataFrame) -> tuple[int | None, int | None]:
     """Current follower total for our accounts, and how many were added since the last refresh.
 
-    The total is every count from the latest run. The change only includes
-    accounts that already had a number last time, so a platform collected for
-    the first time does not look like thousands of new followers. Runs with no
-    counts at all are skipped, so a failed collection does not zero the total.
+    The total is every comparable count from the latest run. WhatsApp and
+    Snapchat stay on the platform list and are not added here. The change only
+    includes accounts that already had a number last time, so a platform
+    collected for the first time does not look like thousands of new followers.
+    Runs with no counts at all are skipped, so a failed collection does not
+    zero the total.
     """
     if df.empty:
         return None, None
     owned = df[df["owned"] & df["followers"].notna()]
+    if "platform" in owned.columns:
+        owned = owned[~owned["platform"].isin(OWNED_ONLY_PLATFORMS)]
     if owned.empty:
         return None, None
     runs = sorted(owned["run_id"].unique())
@@ -382,7 +391,12 @@ def owned_by_platform(df: pd.DataFrame) -> pd.DataFrame:
         if len(runs) >= 2
         else pd.NA
     )
-    return out.sort_values("now", ascending=False)
+    out = out.sort_values("now", ascending=False)
+    for platform in OWNED_ONLY_PLATFORMS:
+        label = PLATFORM_AR[platform]
+        if label not in out.index:
+            out.loc[label] = {"now": pd.NA, "before": pd.NA}
+    return out
 
 
 entity_labels = {e.key: e.short_name for e in config.accounts.entities}
@@ -393,28 +407,28 @@ present_keys = (
     else list(entity_labels)
 )
 present_keys.sort(key=lambda key: (key not in owned_keys, entity_labels.get(key, key)))
-platform_options = (
-    sorted(followers_df["platform"].dropna().unique()) if not followers_df.empty else []
+_platform_order = ("instagram", "x", "youtube", "linkedin", *OWNED_ONLY_PLATFORMS)
+_present_platforms = (
+    set(followers_df["platform"].dropna()) if not followers_df.empty else set()
 )
+platform_options = [
+    platform
+    for platform in _platform_order
+    if platform in _present_platforms or platform in OWNED_ONLY_PLATFORMS
+]
 
 with st.container(border=True):
     st.markdown("##### الحسابات المعروضة")
     scope = st.segmented_control(
         "نطاق الحسابات",
-        options=["all", "ours", "benchmarks"],
+        options=["all", "ours"],
         default="all",
-        format_func=lambda key: {
-            "all": "كل الجهات",
-            "ours": "حساباتنا",
-            "benchmarks": "الجهات المرجعية",
-        }[key],
-        key="account_scope",
+        format_func=lambda key: {"all": "كل الجهات", "ours": "حساباتنا"}[key],
+        key="account_view",
         label_visibility="collapsed",
     )
     if scope == "ours":
         choices = [key for key in present_keys if key in owned_keys]
-    elif scope == "benchmarks":
-        choices = [key for key in present_keys if key not in owned_keys]
     else:
         choices = present_keys
 
@@ -459,7 +473,12 @@ positive_share = (
     sentiment_counts.get("Positive", 0) / total_scored * 100 if total_scored else 0
 )
 
-if "likes" in comments_f.columns and comments_f["likes"].notna().any():
+week_likes = Database(db_path).week_post_likes(
+    get_config().settings.windows.comments_scrape_days
+)
+if week_likes is not None:
+    comment_likes = week_likes
+elif "likes" in comments_f.columns and comments_f["likes"].notna().any():
     comment_likes = int(comments_f["likes"].fillna(0).sum())
 else:
     comment_likes = None
@@ -507,9 +526,12 @@ if not by_platform.empty:
             else:
                 delta = "بدون تغيير"
                 delta_color = "off"
-        column.metric(
-            str(platform), f"{int(row['now']):,}", delta=delta, delta_color=delta_color
-        )
+        if pd.isna(row["now"]):
+            column.metric(str(platform), "—")
+        else:
+            column.metric(
+                str(platform), f"{int(row['now']):,}", delta=delta, delta_color=delta_color
+            )
 
 st.divider()
 
@@ -527,100 +549,54 @@ with tab_growth:
     if followers_f.empty:
         st.info("لا توجد بيانات متابعين. شغّل خط المعالجة لجمع البيانات.")
     else:
-        st.markdown("#### نمو المتابعين: حساباتنا مقابل الجهات المرجعية")
-
         valid = followers_f.dropna(subset=["followers"])
+        if "platform" in valid.columns:
+            valid = valid[~valid["platform"].isin(OWNED_ONLY_PLATFORMS)]
         if valid.empty:
             st.warning(
                 "تم تسجيل الحسابات لكن لم يتم جمع أي عدد متابعين. "
                 "تحقق من ضبط `APIFY_TOKEN`."
             )
         else:
-            trend = (
-                valid.groupby(["run_started_at", "الجهة", "النوع"], as_index=False)[
-                    "followers"
-                ]
-                .sum()
-                .sort_values("run_started_at")
-            )
-
-            runs_available = trend["run_started_at"].nunique()
-            our_names = set(valid[valid["owned"]]["الجهة"].unique())
+            newest_by_entity = valid.groupby("entity_key")["run_id"].transform("max")
+            current = valid[valid["run_id"] == newest_by_entity]
+            our_names = set(current[current["owned"]]["الجهة"].unique())
             entity_order = sorted(
-                trend["الجهة"].unique(), key=lambda name: (name in our_names, name)
+                current["الجهة"].unique(), key=lambda name: (name not in our_names, name)
             )
             styles = entity_styles(entity_order, our_names)
-            if runs_available < 2:
-                # A single run has no trend to draw, so compare levels instead.
-                st.caption(
-                    "يتوفر تشغيل واحد فقط حتى الآن، لذا يُعرض المقارنة كأعمدة. "
-                    "سيظهر الرسم الزمني بعد التشغيل الأسبوعي القادم."
-                )
-                latest = trend[trend["run_started_at"] == trend["run_started_at"].max()]
-                fig = px.bar(
-                    latest.sort_values("followers"),
-                    x="followers",
-                    y="الجهة",
-                    color="النوع",
-                    orientation="h",
-                    labels={"followers": "عدد المتابعين", "الجهة": ""},
-                    color_discrete_map={"حساباتنا": PRIMARY, "الجهات المرجعية": "#c4b49a"},
-                    text_auto=".2s",
-                )
-                show_chart(fig, height=460)
-            else:
-                st.caption(
-                    "إجمالي المتابعين لكل جهة عبر المنصات المحددة. "
-                    "خط حساباتنا مميّز بالسماكة واللون."
-                )
-                # Explicit colors: Streamlit would otherwise substitute its own
-                # palette, and one of those swatches is too pale to see here.
-                fig = px.line(
-                    trend,
-                    x="run_started_at",
+            platform_order = [
+                PLATFORM_AR[name]
+                for name in ("instagram", "x", "youtube", "linkedin")
+                if PLATFORM_AR.get(name) in set(current["المنصة"])
+            ]
+            if scope != "ours":
+                st.markdown("#### المتابعون حسب المنصة: حساباتنا مقابل الجهات المرجعية")
+                st.caption("عدد المتابعين في كل منصة. حساباتنا تظهر مع الجهات المرجعية في كل مجموعة.")
+                by_network = px.bar(
+                    current,
+                    x="المنصة",
                     y="followers",
                     color="الجهة",
-                    markers=True,
-                    labels={
-                        "run_started_at": "تاريخ التشغيل",
-                        "followers": "عدد المتابعين",
-                    },
-                    category_orders={"الجهة": entity_order},
+                    barmode="group",
+                    labels={"followers": "عدد المتابعين", "المنصة": ""},
+                    text_auto=".2s",
+                    category_orders={"الجهة": entity_order, "المنصة": platform_order},
                     color_discrete_map={
                         name: style["color"] for name, style in styles.items()
                     },
                 )
-                for trace in fig.data:
-                    style = styles[trace.name]
-                    trace.line.update(
-                        width=style["width"], color=style["color"], dash=style["dash"]
-                    )
-                    trace.marker.update(
-                        size=style["size"],
-                        color=style["color"],
-                        symbol=style["symbol"],
-                    )
-                    trace.opacity = 1.0
-                # Solid lines first, dashed lines after, ours last. A dashed
-                # line drawn over a matching solid one leaves gaps, so both
-                # regions stay visible when their totals coincide.
-                fig.data = tuple(
-                    sorted(
-                        fig.data,
-                        key=lambda trace: (
-                            2
-                            if trace.name in our_names
-                            else 0
-                            if styles[trace.name]["dash"] == "solid"
-                            else 1
-                        ),
-                    )
-                )
-                show_chart(fig, height=480)
+                show_chart(by_network, height=480)
 
             st.markdown("#### المتابعون حسب المنصة (آخر تشغيل)")
-            latest_run = valid["run_id"].max()
-            latest = valid[valid["run_id"] == latest_run]
+            counted = followers_f.dropna(subset=["followers"])
+            latest_run = counted["run_id"].max()
+            latest = counted[counted["run_id"] == latest_run]
+            our_platform_order = [
+                PLATFORM_AR[name]
+                for name in ("instagram", "x", "youtube", "linkedin", "whatsapp", "snapchat")
+                if PLATFORM_AR.get(name) in set(latest["المنصة"])
+            ]
             by_platform = px.bar(
                 latest,
                 x="المنصة",
@@ -628,13 +604,34 @@ with tab_growth:
                 color="الجهة",
                 barmode="group",
                 labels={"followers": "عدد المتابعين", "المنصة": ""},
-                text_auto=".2s",
+                text_auto=".3s",
                 color_discrete_map={
                     name: style["color"] for name, style in styles.items()
                 },
-                category_orders={"الجهة": entity_order},
+                category_orders={"الجهة": entity_order, "المنصة": our_platform_order},
             )
             show_chart(by_platform, height=430)
+
+            if scope != "ours":
+                st.markdown("#### مقارنة المتابعين بين المكاتب")
+                newest_by_entity = valid.groupby("entity_key")["run_id"].transform("max")
+                office_rows = valid[valid["run_id"] == newest_by_entity]
+                office_totals = (
+                    office_rows.groupby(["الجهة", "النوع"], as_index=False)["followers"]
+                    .sum()
+                    .sort_values("followers")
+                )
+                comparison = px.bar(
+                    office_totals,
+                    x="followers",
+                    y="الجهة",
+                    color="النوع",
+                    orientation="h",
+                    labels={"followers": "عدد المتابعين", "الجهة": ""},
+                    color_discrete_map={"حساباتنا": PRIMARY, "الجهات المرجعية": "#c4a35a"},
+                    text_auto=".3s",
+                )
+                show_chart(comparison, height=480)
 
             with st.expander("📋 جدول المتابعين التفصيلي (آخر تشغيل)"):
                 table = latest[

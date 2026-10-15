@@ -32,6 +32,19 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 CREATE INDEX IF NOT EXISTS idx_followers_entity
     ON follower_snapshots (entity_key, platform, captured_at);
 
+-- Likes on our own posts. One row per post, updated when it is seen again.
+CREATE TABLE IF NOT EXISTS post_engagement (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    entity_key   TEXT NOT NULL,
+    platform     TEXT NOT NULL,
+    post_url     TEXT NOT NULL,
+    published_at TEXT,
+    likes        INTEGER NOT NULL DEFAULT 0,
+    fetched_at   TEXT NOT NULL,
+    UNIQUE (platform, post_url)
+);
+
 -- url_hash dedupes the same article arriving from several keywords/sources.
 CREATE TABLE IF NOT EXISTS news_articles (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

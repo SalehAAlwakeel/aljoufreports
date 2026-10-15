@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import logging
+import shutil
 from functools import lru_cache
 import smtplib
 import subprocess
@@ -23,7 +24,7 @@ from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 from ..config import AppConfig
-from ..models import PLATFORM_AR, SENTIMENT_AR, RunSummary
+from ..models import OWNED_ONLY_PLATFORMS, PLATFORM_AR, SENTIMENT_AR, RunSummary
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ _MONTHS = [
     "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ]
 _RIYADH = ZoneInfo("Asia/Riyadh")
-_PLATFORM_ORDER = ("instagram", "x", "youtube", "linkedin")
+_PLATFORM_ORDER = ("instagram", "x", "youtube", "linkedin", "whatsapp", "snapchat")
 
 
 class EmailNotConfigured(RuntimeError):
@@ -191,7 +192,7 @@ def _logo_png() -> bytes | None:
     from PIL import Image
 
     image = Image.open(_LOGO_PATH).convert("RGB")
-    image.thumbnail((560, 220), Image.Resampling.LANCZOS)
+    image.thumbnail((560, 280), Image.Resampling.LANCZOS)
     buffer = BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()
@@ -617,10 +618,20 @@ def _comment_lines(comments: Sequence[dict[str, Any]], top_negative: Sequence[di
 
 
 def _edge_path() -> Path | None:
-    candidates = (
+    candidates = [
         Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
         Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
-    )
+    ]
+    for name in (
+        "msedge",
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+    ):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
     return next((path for path in candidates if path.exists()), None)
 
 
@@ -640,6 +651,8 @@ def html_to_pdf(page: str) -> bytes | None:
                     str(edge),
                     "--headless=new",
                     "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
                     "--no-pdf-header-footer",
                     f"--print-to-pdf={pdf_path}",
                     html_path.as_uri(),
@@ -789,7 +802,7 @@ def insight_table(
         [
             ("stat-followers", "المتابعون", followers),
             ("stat-extra", "متابعون إضافيون", extra),
-            ("stat-likes", "إعجابات التعليقات", likes),
+            ("stat-likes", "إعجابات الأسبوع", likes),
         ],
         [
             ("stat-comments", "التعليقات", comments),
@@ -855,6 +868,7 @@ class WeeklyMailer:
         week_news: Sequence[dict[str, Any]],
         ranking: Sequence[dict[str, Any]] = (),
         outside_news: Sequence[dict[str, Any]] = (),
+        post_likes: int | None = None,
     ) -> tuple[str, dict[str, bytes]]:
         days = self.config.settings.windows.comments_scrape_days
         sentiment = summary.sentiment_counts
@@ -864,7 +878,10 @@ class WeeklyMailer:
         scored = positive + negative + neutral
         extra = _extra_followers(owned_followers)
         follower_total = sum(
-            int(row["followers"]) for row in owned_followers if row.get("followers") is not None
+            int(row["followers"])
+            for row in owned_followers
+            if row.get("followers") is not None
+            and row.get("platform") not in OWNED_ONLY_PLATFORMS
         )
         images: dict[str, bytes] = {}
         try:
@@ -880,8 +897,8 @@ class WeeklyMailer:
         logo = _logo_png()
         if logo:
             images["logo"] = logo
-        likes = _comment_likes(week_comments)
-        platforms = sum(1 for row in owned_followers if row.get("followers") is not None)
+        likes = post_likes if post_likes is not None else _comment_likes(week_comments)
+        platforms = len({str(row.get("platform")) for row in owned_followers if row.get("platform")})
         grid, grid_images = insight_table(
             _ltr(_fmt_int(follower_total)),
             _ltr(_fmt_signed_int(extra)),
@@ -909,13 +926,25 @@ class WeeklyMailer:
         dashboard_url = _esc(self.config.dashboard_url)
 
         body = f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:{PAPER};font-family:Tahoma,'Segoe UI',Arial,sans-serif;direction:rtl;text-align:right;color:{INK}">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{PAPER}">
-    <tr><td align="center" style="padding:18px 12px 28px">
-      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px;background:{CREAM};border-radius:18px;overflow:hidden">
-        <tr><td style="background:#000000;text-align:center;padding:18px 16px 14px">
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<style>
+  body {{ margin:0; padding:0; width:100%; }}
+  img {{ border:0; display:block; margin:0 auto; }}
+  @media only screen and (max-width:680px) {{
+    .jsdo-card {{ width:100% !important; max-width:100% !important; }}
+    .jsdo-pad {{ padding-left:14px !important; padding-right:14px !important; }}
+  }}
+</style>
+</head>
+<body style="margin:0;padding:0;width:100%;background:{PAPER};font-family:Tahoma,'Segoe UI',Arial,sans-serif;color:{INK};text-align:center;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{PAPER};margin:0 auto;">
+    <tr><td align="center" style="padding:12px 8px 24px;text-align:center;">
+      <table role="presentation" class="jsdo-card" dir="rtl" align="center" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;margin:0 auto;background:{CREAM};border-radius:18px;overflow:hidden;direction:rtl;text-align:center;">
+        <tr><td style="background:#ffffff;text-align:center;padding:18px 16px 14px">
           {logo_img or f'<div style="color:#f0d9b1;font-size:14px">{_esc("المكتب الاستراتيجي لتطوير منطقة الجوف")}</div>'}
         </td></tr>
         <tr><td style="background:{OLIVE};padding:22px 28px 18px;text-align:center">
@@ -927,21 +956,21 @@ class WeeklyMailer:
         <tr><td style="background:{OLIVE_DARK};color:{CREAM};text-align:center;padding:9px 16px;font-size:13px">
           آخر {_ltr(str(days))} أيام · {stamp}
         </td></tr>
-        <tr><td style="padding:8px 22px 26px">
+        <tr><td class="jsdo-pad" align="center" style="padding:8px 16px 26px;text-align:center;">
           {_section("أبرز الأخبار")}
           {news_cards}
           {_section("ملخص الأسبوع")}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="8">
             <tr>
-              <td valign="middle" style="background:{WHITE};border-radius:16px;padding:14px 12px;text-align:center;border:1px solid #eadfca">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-                  <td width="180" valign="middle" align="center">{pie_img}</td>
-                  <td valign="middle" style="text-align:right;padding-right:8px">
+              <td align="center" valign="middle" style="background:{WHITE};border-radius:16px;padding:14px 12px;text-align:center;border:1px solid #eadfca">
+                <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>
+                  <td width="168" valign="middle" align="center" style="text-align:center;">{pie_img}</td>
+                  <td valign="middle" align="center" style="text-align:center;padding:0 12px">
                     <div style="font-size:26px;font-weight:700;color:#21a65a;line-height:1">{_ltr(_share(positive, scored))}</div>
                     <div style="font-size:12px;color:{STONE};margin:2px 0 8px">نسبة التعليقات الإيجابية <span style="display:inline-block;width:9px;height:9px;background:#21a65a"></span></div>
                     <div style="font-size:26px;font-weight:700;color:{RED};line-height:1">{_ltr(_share(negative, scored))}</div>
                     <div style="font-size:12px;color:{STONE};margin:2px 0 8px">نسبة التعليقات السلبية <span style="display:inline-block;width:9px;height:9px;background:{RED}"></span></div>
-                    <div style="font-size:13px;color:{STONE}">محايد {_ltr(_share(neutral, scored))}</div>
+                    <div style="font-size:13px;color:{STONE}">محايد {_ltr(_share(neutral, scored))} <span style="display:inline-block;width:9px;height:9px;background:#b0b8a8"></span></div>
                   </td>
                 </tr></table>
               </td>
@@ -989,7 +1018,10 @@ class WeeklyMailer:
         scored = positive + negative + neutral
         extra = _extra_followers(owned_followers)
         follower_total = sum(
-            int(row["followers"]) for row in owned_followers if row.get("followers") is not None
+            int(row["followers"])
+            for row in owned_followers
+            if row.get("followers") is not None
+            and row.get("platform") not in OWNED_ONLY_PLATFORMS
         )
         now = datetime.now(_RIYADH)
         stamp = (
@@ -1232,8 +1264,17 @@ class WeeklyMailer:
         bars = []
         for row in ordered:
             name = _esc(PLATFORM_AR.get(str(row.get("platform")), str(row.get("platform"))))
+            profile_url = str(row.get("profile_url") or "").strip()
+            if profile_url:
+                name = f'<a href="{_esc(profile_url)}" style="color:{STONE};text-decoration:none">{name}</a>'
             delta = row.get("delta")
-            if delta is None or row.get("followers") is None:
+            if row.get("followers") is None:
+                change = f'<span style="color:{STONE}">{_ltr("—")}</span>'
+                bar_color = STONE
+            elif delta is None and str(row.get("platform")) in OWNED_ONLY_PLATFORMS:
+                change = ""
+                bar_color = OLIVE
+            elif delta is None:
                 change = f'<span style="color:{LAVENDER}">جديد</span>'
                 bar_color = LAVENDER
             elif int(delta) < 0:
@@ -1253,17 +1294,19 @@ class WeeklyMailer:
                   <div style="font-size:14px;font-weight:700">{change}</div>
                 </td>"""
             )
+            if row.get("followers") is None:
+                continue
             width = 0
-            if row.get("followers") is not None and int(row["followers"]) > 0:
+            if int(row["followers"]) > 0:
                 width = max(4, round(int(row["followers"]) / highest * 100))
             rest = 100 - width
             bars.append(
                 f"""
                 <tr>
-                  <td width="88" style="font-size:12px;color:{STONE};padding:6px 0">{name}</td>
-                  <td width="58" style="font-size:12px;font-weight:700;color:{INK};padding:6px 8px 6px 0">{_ltr(_fmt_int(row.get('followers')))}</td>
-                  <td style="padding:6px 0">
-                    <table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0">
+                  <td width="30%" align="center" style="font-size:12px;color:{STONE};padding:6px 4px;text-align:center">{name}</td>
+                  <td width="22%" align="center" style="font-size:12px;font-weight:700;color:{INK};padding:6px 4px;text-align:center">{_ltr(_fmt_int(row.get('followers')))}</td>
+                  <td width="48%" align="center" style="padding:6px 0">
+                    <table role="presentation" align="center" dir="rtl" width="100%" cellpadding="0" cellspacing="0">
                       <tr>
                         <td width="{width}%" bgcolor="{bar_color}" style="height:12px;border-radius:8px;font-size:1px;line-height:12px">&nbsp;</td>
                         <td width="{rest}%"></td>
@@ -1272,8 +1315,23 @@ class WeeklyMailer:
                   </td>
                 </tr>"""
             )
+        comparable = [row for row in ordered if row.get("platform") not in OWNED_ONLY_PLATFORMS]
+        own_only = [row for row in ordered if row.get("platform") in OWNED_ONLY_PLATFORMS]
+        # The card HTML was built in `ordered` sequence, so split it the same way.
+        card_rows = []
+        cursor = 0
+        for group in (comparable, own_only):
+            if not group:
+                continue
+            chunk = cards[cursor : cursor + len(group)]
+            cursor += len(group)
+            width = max(25, 100 // len(group))
+            chunk = [card.replace('width="25%"', f'width="{width}%"', 1) for card in chunk]
+            card_rows.append(
+                f'<table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>{"".join(chunk)}</tr></table>'
+            )
         return f"""
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>{''.join(cards)}</tr></table>
+        {''.join(card_rows)}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">{''.join(bars)}</table>"""
 
     def _comparison(self, board: Sequence[dict[str, Any]], images: dict[str, bytes]) -> str:
@@ -1302,12 +1360,16 @@ class WeeklyMailer:
             graph = (
                 '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
                 f'style="background:{WHITE};border:1px solid #eadfca;border-radius:16px">'
-                f'<tr><td style="padding:12px 8px;text-align:center">'
+                f'<tr><td align="center" style="padding:12px 8px;text-align:center">'
                 f"{_image('comparison', images, names, width=600)}</td></tr></table>"
             )
         else:
             graph = f'<p style="margin:0;font-size:14px;color:{INK}">{names}</p>'
-        caption = f'<p style="margin:8px 0 0;font-size:13px;color:{STONE}">{note}.</p>' if note else ""
+        caption = (
+            f'<p style="margin:8px 0 0;font-size:13px;color:{STONE};text-align:center">{note}.</p>'
+            if note
+            else ""
+        )
         return f"""
         {_section("موقفنا بين المكاتب")}
         {graph}

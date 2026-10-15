@@ -28,7 +28,13 @@ PLATFORM_AR: dict[str, str] = {
     "x": "إكس",
     "youtube": "يوتيوب",
     "linkedin": "لينكد إن",
+    "whatsapp": "واتساب",
+    "snapchat": "سناب شات",
 }
+
+# Our own channels. They appear in the account list and are not added to the
+# follower total that is compared with the other offices.
+OWNED_ONLY_PLATFORMS: tuple[str, ...] = ("whatsapp", "snapchat")
 
 
 def utcnow() -> datetime:

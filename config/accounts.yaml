@@ -27,6 +27,15 @@ entities:
       x:
         handle: Jso_ksa
         url: https://x.com/Jso_ksa
+      # Listed for our office only. They are not collected or compared.
+      whatsapp:
+        handle: 0029VbBMfD677qVZnx0GBS2j
+        url: https://whatsapp.com/channel/0029VbBMfD677qVZnx0GBS2j
+      snapchat:
+        handle: jsdo_ksa
+        url: https://www.snapchat.com/@jsdo_ksa
+        # The public page returns 0. The app shows this follower count.
+        followers: 3
 
   - key: makkah
     name_ar: هيئة تطوير منطقة مكة المكرمة

@@ -242,7 +242,7 @@ h5 {{
     box-shadow: 0 1px 2px rgba(61, 52, 40, 0.08);
 }}
 .jsdo-banner {{
-    background: #000000;
+    background: #ffffff;
     padding: 16px 20px 12px;
     display: flex;
     justify-content: center;
@@ -412,11 +412,25 @@ h5 {{
 }}
 
 /* Streamlit slides a closed sidebar off-screen with translateX. In RTL that
-   slide crosses the page and leaves a vertical strip of labels. On a phone
-   the panel is removed; the refresh control lives on the page instead. */
+   slide crosses the page and leaves a vertical line down the middle. */
 .stSidebar,
 [data-testid="stSidebar"] {{
     overflow: hidden !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}}
+[data-testid="stSidebar"][aria-expanded="false"] {{
+    transform: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}}
+[data-testid="stSidebarResizeHandle"] {{
+    display: none !important;
+    width: 0 !important;
+    border: 0 !important;
 }}
 .st-key-phone_refresh {{
     display: none !important;
@@ -473,7 +487,7 @@ h5 {{
     }}
     .jsdo-header {{
         padding: 16px 14px 14px;
-        border-radius: 14px;
+        border-radius: 0 !important;
         gap: 12px;
     }}
     .jsdo-header-main {{

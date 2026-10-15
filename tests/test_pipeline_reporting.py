@@ -40,9 +40,12 @@ def test_deltas_compare_the_two_most_recent_successful_runs(pipeline):
         pipeline.db.finish_run(run_id, now, "completed")
 
     rows = pipeline.owned_follower_deltas()
-    assert len(rows) == 1
-    assert rows[0]["followers"] == 1200
-    assert rows[0]["delta"] == 200
+    counted = [row for row in rows if row.get("followers") is not None]
+    assert len(counted) == 1
+    assert counted[0]["followers"] == 1200
+    assert counted[0]["delta"] == 200
+    listed = {row["platform"] for row in rows if row.get("followers") is None}
+    assert listed == {"whatsapp", "snapchat"}
 
 
 def test_failed_run_does_not_become_the_latest(pipeline):
@@ -59,9 +62,10 @@ def test_failed_run_does_not_become_the_latest(pipeline):
     pipeline.db.finish_run(failed, now, "completed_with_warnings")
 
     rows = pipeline.owned_follower_deltas()
-    assert len(rows) == 1
-    assert rows[0]["followers"] == 1200, "should fall back to the last good run"
-    assert rows[0]["delta"] == 200
+    counted = [row for row in rows if row.get("followers") is not None]
+    assert len(counted) == 1
+    assert counted[0]["followers"] == 1200, "should fall back to the last good run"
+    assert counted[0]["delta"] == 200
 
 
 def test_deltas_are_none_on_the_first_run(pipeline):
@@ -101,3 +105,14 @@ def test_news_counts_split_multi_keyword_articles(pipeline):
     )
 
     assert pipeline.news_counts_by_keyword() == {"الجوف": 2, "سكاكا": 1}
+
+
+def test_public_pages_publish_follower_counts():
+    from aljouf_report.collectors.public_counts import (
+        parse_snapchat_subscribers,
+        parse_whatsapp_followers,
+    )
+
+    assert parse_whatsapp_followers("Channel • 354 followers") == 354
+    page = '"publicProfileInfo":{"username":"jsdo_ksa","subscriberCount":"0","bio":""}'
+    assert parse_snapchat_subscribers(page) == 0

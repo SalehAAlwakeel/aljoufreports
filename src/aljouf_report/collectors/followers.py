@@ -147,6 +147,14 @@ class FollowerCollector:
                 snapshots.extend(self._collect_batched(platform, spec, pairs))
         return snapshots
 
+    def collect_one(self, entity: Entity, platform: str) -> FollowerSnapshot:
+        """One account, so a new follow can be checked without scraping everyone."""
+        spec = SPECS[platform]
+        account = entity.account(platform)
+        if account is None:
+            raise KeyError(platform)
+        return self._collect_one_by_one(platform, spec, [(entity, account)])[0]
+
     # -- strategies ------------------------------------------------------- #
     def _collect_batched(
         self,

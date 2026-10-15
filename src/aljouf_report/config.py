@@ -12,7 +12,7 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-Platform = Literal["instagram", "x", "youtube", "linkedin"]
+Platform = Literal["instagram", "x", "youtube", "linkedin", "whatsapp", "snapchat"]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PROJECT_ROOT / "config"
@@ -24,6 +24,9 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 class PlatformAccount(BaseModel):
     handle: str
     url: str
+    # Used when the public page hides the count. Snapchat's website returns 0
+    # for this account even though the app shows the followers.
+    followers: int | None = None
 
 
 class Entity(BaseModel):

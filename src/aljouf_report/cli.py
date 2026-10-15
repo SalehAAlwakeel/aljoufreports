@@ -16,7 +16,7 @@ from rich.table import Table
 
 from .config import PROJECT_ROOT, load_config
 from .logging_setup import setup_logging
-from .models import SENTIMENT_AR, utcnow
+from .models import OWNED_ONLY_PLATFORMS, SENTIMENT_AR, utcnow
 from .pipeline import Pipeline
 
 app = typer.Typer(
@@ -268,7 +268,9 @@ def send_email(
     mailer = WeeklyMailer(config)
     owned = pipeline.owned_follower_deltas()
     follower_total = sum(
-        int(row["followers"]) for row in owned if row.get("followers") is not None
+        int(row["followers"])
+        for row in owned
+        if row.get("followers") is not None and row.get("platform") not in OWNED_ONLY_PLATFORMS
     )
     outside_news = pipeline.db.recent_news(
         max(window, config.settings.windows.news_lookback_days)
@@ -283,6 +285,7 @@ def send_email(
         week_news=pipeline.db.recent_news(window),
         ranking=ranking,
         outside_news=outside_news,
+        post_likes=pipeline.db.week_post_likes(window),
     )
     from .notify.mailer import embed_images, report_file
 

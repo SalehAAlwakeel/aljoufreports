@@ -479,6 +479,26 @@ h5 {{
     .jsdo-header-main {{
         align-items: center;
     }}
+    h1, h2, h3, h4, h5, h6,
+    [data-testid="stHeading"],
+    [data-testid="stHeading"] *,
+    [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3,
+    [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stMarkdownContainer"] h5,
+    [data-testid="stMarkdownContainer"] h6,
+    .jsdo-kicker, .jsdo-header h1, .jsdo-meta, .jsdo-copy, .jsdo-copy p,
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] label {{
+        text-align: center !important;
+        justify-content: center !important;
+    }}
+    [data-testid="stHeading"],
+    [data-testid="stHeadingWithActionElements"] {{
+        justify-content: center !important;
+    }}
     .jsdo-kicker, .jsdo-header h1, .jsdo-meta {{
         overflow-wrap: anywhere;
     }}

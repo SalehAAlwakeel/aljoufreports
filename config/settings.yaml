@@ -180,6 +180,8 @@ email:
     - ajkattan@jsdo.gov.sa
     - wakeelsaleh@gmail.com
     - a.shuqair@jsdo.gov.sa
+    - exc.social@jsdo.gov.sa
+    - laith.louid@jo.ey.com
   # Shown in the email body as the link to the live dashboard.
   # Override with DASHBOARD_URL in .env.
   dashboard_url: https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/

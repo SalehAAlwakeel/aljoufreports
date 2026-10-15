@@ -63,7 +63,7 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'ajkattan@jsdo.gov.sa,wakeelsaleh@gmail.com,a.shuqair@jsdo.gov.sa' }}
+          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'ajkattan@jsdo.gov.sa,wakeelsaleh@gmail.com,a.shuqair@jsdo.gov.sa,exc.social@jsdo.gov.sa,laith.louid@jo.ey.com' }}
           DASHBOARD_URL: ${{ vars.DASHBOARD_URL != '' && vars.DASHBOARD_URL || 'https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/' }}
         run: |
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}

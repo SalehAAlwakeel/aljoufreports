@@ -404,8 +404,7 @@ class Pipeline:
 
     def follower_ranking(self) -> list[dict[str, Any]]:
         """Every authority's latest follower total, largest first."""
-        history = self.db.follower_history(limit_runs=6)
-        counted = [row for row in history if row["followers"] is not None]
+        counted = self.db.latest_counted_snapshots()
         latest_by_entity: dict[str, int] = {}
         for row in counted:
             key = str(row["entity_key"])

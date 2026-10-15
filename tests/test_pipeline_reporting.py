@@ -82,6 +82,31 @@ def test_no_successful_runs_yields_no_rows(pipeline):
     assert pipeline.owned_follower_deltas() == []
 
 
+def test_ranking_keeps_offices_after_an_owned_only_refresh(pipeline):
+    """Refreshing only our office must not drop the others from the comparison."""
+    now = datetime.now(timezone.utc)
+    full = pipeline.db.start_run(now - timedelta(days=7))
+    other = FollowerSnapshot(
+        entity_key="hail",
+        entity_name_ar="هيئة تطوير منطقة حائل",
+        entity_name_en="Hail",
+        owned=False,
+        platform="instagram",
+        handle="hail",
+        profile_url="https://example.com/hail",
+        followers=27000,
+    )
+    pipeline.db.save_followers(full, [_snapshot(9991), other])
+    pipeline.db.finish_run(full, now, "completed")
+    for _ in range(6):
+        run_id = pipeline.db.start_run(now)
+        pipeline.db.save_followers(run_id, [_snapshot(9996)])
+        pipeline.db.finish_run(run_id, now, "completed")
+
+    keys = {row["entity_key"] for row in pipeline.follower_ranking()}
+    assert keys == {"jsdo", "hail"}
+
+
 def test_news_counts_split_multi_keyword_articles(pipeline):
     from aljouf_report.models import NewsArticle
 

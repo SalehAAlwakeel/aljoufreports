@@ -174,6 +174,33 @@ class Database:
             )
         return len(rows)
 
+    def latest_counted_snapshots(self) -> list[dict[str, Any]]:
+        """Each office's newest run that stored a follower count.
+
+        A later run that only refreshed one office must not hide the others.
+        """
+        with self.connect() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT f.*, r.started_at AS run_started_at
+                    FROM follower_snapshots f
+                    JOIN runs r ON r.id = f.run_id
+                    JOIN (
+                        SELECT entity_key, MAX(run_id) AS run_id
+                        FROM follower_snapshots
+                        WHERE followers IS NOT NULL
+                        GROUP BY entity_key
+                    ) latest
+                      ON latest.entity_key = f.entity_key
+                     AND latest.run_id = f.run_id
+                    WHERE f.followers IS NOT NULL
+                    ORDER BY f.entity_key, f.platform
+                    """
+                ).fetchall()
+            ]
+
     def follower_history(self, limit_runs: int = 26) -> list[dict[str, Any]]:
         """Snapshots for the most recent `limit_runs` runs, oldest first."""
         with self.connect() as conn:

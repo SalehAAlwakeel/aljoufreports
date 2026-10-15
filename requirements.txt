@@ -1,4 +1,5 @@
 # ---- core ----
+tzdata>=2024.1
 pydantic>=2.7
 pydantic-settings>=2.3
 python-dotenv>=1.0

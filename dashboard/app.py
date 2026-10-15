@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import sys
+import traceback
 from pathlib import Path
 
 import pandas as pd
@@ -21,19 +22,30 @@ import streamlit.components.v1 as components
 # from any working directory.
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
-for extra_path in (PROJECT_ROOT / "src", HERE):
-    if str(extra_path) not in sys.path:
-        sys.path.insert(0, str(extra_path))
+# The repository source has to win over any older installed copy. Streamlit
+# Cloud keeps the environment between deploys, and an older package was being
+# imported ahead of this checkout.
+for extra_path in (HERE, PROJECT_ROOT / "src"):
+    resolved = str(extra_path.resolve())
+    sys.path[:] = [item for item in sys.path if str(Path(item).resolve()) != resolved]
+    sys.path.insert(0, resolved)
 
-from aljouf_report.config import load_config  # noqa: E402
-from aljouf_report.models import (  # noqa: E402
-    DEMO_MODEL_TAG,
-    OWNED_ONLY_PLATFORMS,
-    PLATFORM_AR,
-    SENTIMENT_AR,
-)
-from aljouf_report.notify.mailer import embed_images, insight_table  # noqa: E402
-from aljouf_report.storage import Database  # noqa: E402
+_boot_error = None
+try:
+    from aljouf_report.config import load_config  # noqa: E402
+    from aljouf_report.models import (  # noqa: E402
+        DEMO_MODEL_TAG,
+        OWNED_ONLY_PLATFORMS,
+        PLATFORM_AR,
+        SENTIMENT_AR,
+    )
+    from aljouf_report.notify.mailer import embed_images, insight_table  # noqa: E402
+    from aljouf_report.storage import Database  # noqa: E402
+except Exception:
+    _boot_error = traceback.format_exc()
+    load_config = DEMO_MODEL_TAG = OWNED_ONLY_PLATFORMS = None
+    PLATFORM_AR = SENTIMENT_AR = embed_images = insight_table = Database = None
+
 from theme import (  # noqa: E402
     ACCENT,
     BENCHMARK_COLORS,
@@ -53,6 +65,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 apply_rtl()
+if _boot_error:
+    st.error("تعذر فتح لوحة المعلومات.")
+    st.code(_boot_error)
+    st.stop()
 
 
 def auto_refresh(minutes: int) -> None:

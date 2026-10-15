@@ -14,7 +14,7 @@ from functools import lru_cache
 import smtplib
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.policy import SMTP
 from email.utils import formataddr, formatdate
@@ -58,7 +58,10 @@ _MONTHS = [
     "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
     "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ]
-_RIYADH = ZoneInfo("Asia/Riyadh")
+try:
+    _RIYADH = ZoneInfo("Asia/Riyadh")
+except Exception:  # noqa: BLE001 - a slim server image may not ship the timezone database
+    _RIYADH = timezone(timedelta(hours=3))
 _PLATFORM_ORDER = ("instagram", "x", "youtube", "linkedin", "whatsapp", "snapchat")
 
 

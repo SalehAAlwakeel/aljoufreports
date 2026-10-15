@@ -284,9 +284,9 @@ def send_email(
         ranking=ranking,
         outside_news=outside_news,
     )
-    from .notify.mailer import report_file
+    from .notify.mailer import embed_images, report_file
 
-    report_name, report_bytes, report_subtype = report_file(html_body)
+    report_name, report_bytes, report_subtype = report_file(embed_images(html_body, images))
 
     if preview:
         out = PROJECT_ROOT / "logs" / "email_preview.html"
@@ -315,6 +315,7 @@ def send_email(
         summary,
         html_body,
         follower_total,
+        images,
         report_name=report_name,
         report_bytes=report_bytes,
         report_subtype=report_subtype,

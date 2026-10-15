@@ -102,17 +102,26 @@ def test_briefing_shows_gain_comments_and_neighbors():
     assert html.index("خبر سكاكا") < html.index("ملخص الأسبوع")
     assert "السعودية تنجح في استثمار جديد" in html and "السعودية تفوز بكأس الخليج" in html
     assert "نسبة التعليقات الإيجابية" in html
+    assert "إحصائيات الحسابات" in html
+    assert "الردود الإيجابية" in html
+    assert "الردود السلبية" in html
+    assert "الردود المحايدة" in html
     assert "متابعون إضافيون" in html
+    assert images["stat-up"].startswith(b"\x89PNG")
+    assert images["stat-down"].startswith(b"\x89PNG")
+    assert images["stat-neutral"].startswith(b"\x89PNG")
     assert "+10" in html
     assert "نسبة الزيادة" not in html
-    assert "هيئة حائل" in html and "الحدود الشمالية" in html
+    assert "مكتب حائل" in html and "مكتب الحدود الشمالية" in html
+    assert "cid:comparison" in html
+    assert images["comparison"].startswith(b"\x89PNG")
     assert "مبادرة رائعة" in html
     assert ">التعليقات المحايدة<" in html
     assert ">التعليقات السلبية<" not in html
     assert "جديد" in html
-    assert "cid:sentiment" not in html
-    assert "cid:followers" not in html
-    assert images == {}
+    assert "cid:sentiment" in html
+    assert images["sentiment"].startswith(b"\x89PNG")
+    assert images["logo"].startswith(b"\x89PNG")
 
 
 def test_brief_stays_short_and_links_the_download():

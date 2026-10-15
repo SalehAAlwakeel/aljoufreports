@@ -3,10 +3,10 @@
 # visitor's OS dark mode makes that text unreadable.
 [theme]
 base = "light"
-primaryColor = "#118a6e"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f4f8f7"
-textColor = "#263238"
+primaryColor = "#5d7e4e"
+backgroundColor = "#f6f1e4"
+secondaryBackgroundColor = "#fff8dc"
+textColor = "#3d3428"
 font = "'IBM Plex Sans Arabic':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap"
 
 [server]

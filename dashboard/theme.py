@@ -9,21 +9,21 @@ from __future__ import annotations
 
 import streamlit as st
 
-PRIMARY = "#0b5d4a"
-ACCENT = "#118a6e"
+# Al Jouf 2026 identity, the same palette as the weekly report.
+PRIMARY = "#5d7e4e"
+ACCENT = "#3f5a36"
+GOLD = "#d4af37"
 
-# Text colours chosen for contrast on white: INK clears WCAG AA at body size,
-# MUTED is only used at 14px and above where it still clears AA.
-INK = "#16241f"
-MUTED = "#5a6b66"
-LINE = "#d7e2de"
+INK = "#3d3428"
+MUTED = "#8b7355"
+LINE = "#eadfca"
 SURFACE = "#ffffff"
-CANVAS = "#f4f7f6"
+CANVAS = "#f6f1e4"
 
 SENTIMENT_COLORS = {
-    "Positive": "#157f52",
-    "Negative": "#b3271d",
-    "Neutral": "#6b7c86",
+    "Positive": "#3f7a45",
+    "Negative": "#c00000",
+    "Neutral": "#8867b9",
 }
 
 # One dark, distinct color per benchmark. Streamlit's default chart palette
@@ -220,87 +220,114 @@ h5 {{
     max-width: 100%;
 }}
 
-/* Header: white card, green mark, update kept in its own chip. */
+/* Stat sheet: the same three-by-three icon grid as the weekly report. */
+.insight-card {{
+    margin: 4px 0 16px;
+}}
+.insight-card table {{
+    width: 100%;
+    border-collapse: collapse;
+}}
+.insight-card img {{
+    display: block;
+    margin: 0 auto;
+}}
+
+/* Header: black logo band, then the olive title bar used on the report. */
 .jsdo-header-wrap {{
     container-type: inline-size;
     margin-bottom: 16px;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(61, 52, 40, 0.08);
+}}
+.jsdo-banner {{
+    background: #000000;
+    padding: 16px 20px 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}}
+.jsdo-logo {{
+    width: min(460px, 100%);
+    height: auto;
+    display: block;
 }}
 .jsdo-header {{
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    background: {SURFACE};
-    border: 1px solid {LINE};
-    border-radius: 18px;
-    padding: 18px 20px;
+    gap: 14px;
+    background: {PRIMARY};
+    border: 0;
+    border-radius: 0;
+    padding: 22px 22px 18px;
     direction: rtl;
-    text-align: right;
-    box-shadow: 0 1px 2px rgba(22, 36, 31, 0.04);
+    text-align: center !important;
 }}
 .jsdo-header-main {{
     display: flex;
     align-items: center;
-    gap: 16px;
-    flex: 1;
+    justify-content: center;
+    width: 100%;
     min-width: 0;
 }}
 .jsdo-copy {{
     min-width: 0;
-}}
-.jsdo-mark {{
-    width: 54px;
-    height: 54px;
-    border-radius: 16px;
-    background: linear-gradient(160deg, {PRIMARY}, {ACCENT});
-    display: grid;
-    place-items: center;
-    flex: none;
+    text-align: center !important;
 }}
 .jsdo-kicker {{
     margin: 0 0 2px;
     font-size: 0.95rem !important;
     font-weight: 700;
-    color: {PRIMARY} !important;
+    color: #f0d9b1 !important;
     line-height: 1.45;
+    text-align: center !important;
 }}
 .jsdo-header h1 {{
-    color: {INK} !important;
+    color: #ffffff !important;
     margin: 0;
-    font-size: 1.55rem !important;
+    font-size: 1.7rem !important;
     font-weight: 700;
     letter-spacing: 0;
     line-height: 1.35;
+    text-align: center !important;
 }}
 .jsdo-meta {{
     margin: 4px 0 0;
-    color: {MUTED} !important;
+    color: #fff8dc !important;
     font-size: 0.95rem !important;
     line-height: 1.4;
+    text-align: center !important;
 }}
 .jsdo-updated {{
     flex: none;
-    background: {CANVAS};
-    border: 1px solid {LINE};
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 248, 220, 0.4);
     border-radius: 14px;
     padding: 12px 16px;
-    text-align: center;
+    text-align: center !important;
     min-width: 168px;
 }}
+.jsdo-updated span,
+.jsdo-updated strong {{
+    display: block !important;
+    width: 100%;
+    text-align: center !important;
+}}
 .jsdo-updated span {{
-    display: block;
     font-size: 0.85rem !important;
     font-weight: 700;
-    color: {PRIMARY} !important;
+    color: {GOLD} !important;
     line-height: 1.3;
 }}
 .jsdo-updated strong {{
-    display: block;
     margin-top: 4px;
     font-size: 1rem !important;
-    color: {INK} !important;
+    color: #ffffff !important;
     font-weight: 700;
     direction: ltr;
+    unicode-bidi: isolate;
     line-height: 1.3;
 }}
 @container (max-width: 680px) {{
@@ -338,9 +365,9 @@ h5 {{
     direction: rtl;
     text-align: right;
 }}
-.comment-card.is-positive {{ border-right-color: #157f52; }}
-.comment-card.is-negative {{ border-right-color: #b3271d; background: #fff8f7; }}
-.comment-card.is-neutral {{ border-right-color: #6b7c86; }}
+.comment-card.is-positive {{ border-right-color: {PRIMARY}; }}
+.comment-card.is-negative {{ border-right-color: #c00000; background: #fff8f7; }}
+.comment-card.is-neutral {{ border-right-color: #8867b9; }}
 .comment-card .meta {{
     font-size: 0.92rem;
     color: {MUTED};
@@ -445,14 +472,12 @@ h5 {{
         max-width: 100%;
     }}
     .jsdo-header {{
-        flex-direction: column;
-        align-items: stretch;
-        padding: 14px;
+        padding: 16px 14px 14px;
         border-radius: 14px;
         gap: 12px;
     }}
     .jsdo-header-main {{
-        align-items: flex-start;
+        align-items: center;
     }}
     .jsdo-kicker, .jsdo-header h1, .jsdo-meta {{
         overflow-wrap: anywhere;
@@ -460,9 +485,8 @@ h5 {{
     .jsdo-header h1 {{
         font-size: 1.15rem !important;
     }}
-    .jsdo-mark {{
-        width: 44px;
-        height: 44px;
+    .jsdo-logo {{
+        width: min(280px, 92%);
     }}
     .jsdo-updated {{
         min-width: 0;
@@ -551,23 +575,42 @@ def rtl_layout(fig, height: int | None = None):
     return fig
 
 
+def _logo_src() -> str:
+    """The office mark, inlined so the page does not depend on a static server."""
+    import base64
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "aljouf_report"
+        / "notify"
+        / "assets"
+        / "jsdo-logo.png"
+    )
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def header(
     title: str,
     office: str,
     detail: str = "",
     updated: str | None = None,
 ) -> None:
-    """Page header: office, title, and the last refresh in a separate chip."""
+    """Page header: the office logo, then the title and last refresh."""
     import html
 
-    mark = (
-        '<div class="jsdo-mark" aria-hidden="true">'
-        '<svg width="26" height="26" viewBox="0 0 26 26" fill="none">'
-        '<rect x="3" y="14" width="4.5" height="9" rx="1.2" fill="white" opacity="0.65"/>'
-        '<rect x="10.75" y="8" width="4.5" height="15" rx="1.2" fill="white" opacity="0.85"/>'
-        '<rect x="18.5" y="3" width="4.5" height="20" rx="1.2" fill="white"/>'
-        "</svg></div>"
-    )
+    src = _logo_src()
+    if src:
+        banner = (
+            f'<div class="jsdo-banner"><img class="jsdo-logo" src="{src}" '
+            f'alt="{html.escape(office)}"></div>'
+        )
+    else:
+        banner = f'<div class="jsdo-banner"><p class="jsdo-kicker">{html.escape(office)}</p></div>'
     detail_html = (
         f'<p class="jsdo-meta">{html.escape(detail)}</p>' if detail else ""
     )
@@ -578,9 +621,8 @@ def header(
         else ""
     )
     st.markdown(
-        '<div class="jsdo-header-wrap"><div class="jsdo-header">'
-        '<div class="jsdo-header-main">'
-        f'{mark}<div class="jsdo-copy">'
+        f'<div class="jsdo-header-wrap">{banner}'
+        '<div class="jsdo-header"><div class="jsdo-header-main"><div class="jsdo-copy">'
         f'<p class="jsdo-kicker">{html.escape(office)}</p>'
         f"<h1>{html.escape(title)}</h1>"
         f"{detail_html}</div></div>{updated_html}</div></div>",

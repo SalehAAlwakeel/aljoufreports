@@ -15,7 +15,7 @@ from .collectors import ApifyRunner, CommentCollector, FollowerCollector, NewsCo
 from .config import AppConfig, load_config
 from .models import RunSummary, utcnow
 from .notify import WeeklyMailer
-from .notify.mailer import report_file
+from .notify.mailer import embed_images, report_file
 from .storage import Database, sync_all
 
 log = logging.getLogger(__name__)
@@ -188,7 +188,7 @@ class Pipeline:
             outside_news = self.db.recent_news(outside_days)
             ranking = self.follower_ranking()
             top_negative = self.top_negative_comments()
-            body, _images = mailer.render_html(
+            body, images = mailer.render_html(
                 summary,
                 owned_followers=owned,
                 top_negative=top_negative,
@@ -197,11 +197,12 @@ class Pipeline:
                 ranking=ranking,
                 outside_news=outside_news,
             )
-            report_name, report_bytes, report_subtype = report_file(body)
+            report_name, report_bytes, report_subtype = report_file(embed_images(body, images))
             mailer.send(
                 summary,
                 body,
                 follower_total,
+                images,
                 report_name=report_name,
                 report_bytes=report_bytes,
                 report_subtype=report_subtype,
@@ -264,10 +265,15 @@ class Pipeline:
                 row for row in counted
                 if str(row["entity_key"]) == key and int(row["run_id"]) == run_id
             ]
+            entity = next(
+                (item for item in self.config.accounts.entities if item.key == key),
+                None,
+            )
             board.append(
                 {
                     "entity_key": key,
                     "name": rows[0]["entity_name_ar"],
+                    "short_name": entity.short_name if entity else "",
                     "owned": bool(rows[0]["owned"]),
                     "followers": sum(int(row["followers"]) for row in rows),
                 }

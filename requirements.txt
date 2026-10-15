@@ -23,3 +23,8 @@ google-auth>=2.30
 streamlit>=1.37
 plotly>=5.23
 pandas>=2.2
+
+# ---- report charts ----
+Pillow>=10.3
+arabic-reshaper>=3.0
+python-bidi>=0.4

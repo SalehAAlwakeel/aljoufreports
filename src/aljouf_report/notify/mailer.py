@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import logging
+from functools import lru_cache
 import smtplib
 import subprocess
 import tempfile
@@ -150,6 +151,50 @@ def _font(size: int, bold: bool = False):
         if path.exists():
             return ImageFont.truetype(str(path), size)
     return ImageFont.load_default()
+
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "jsdo-logo.png"
+_PIE_GREEN = (33, 166, 90)
+_PIE_RED = (211, 47, 47)
+_PIE_NEUTRAL = (176, 184, 168)
+
+
+def _pie(parts: list[tuple[float, tuple[int, int, int]]]) -> bytes:
+    """A solid pie on white, so mail clients do not drop it."""
+    from PIL import Image, ImageDraw
+
+    size = 320
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    pad = 6
+    box = [pad, pad, size - pad, size - pad]
+    visible = [(value, color) for value, color in parts if value > 0]
+    if not visible:
+        visible = [(1, _PIE_NEUTRAL)]
+    if len(visible) == 1:
+        draw.ellipse(box, fill=visible[0][1])
+    else:
+        total = sum(value for value, _ in visible)
+        start = -90.0
+        for value, color in visible:
+            sweep = 360.0 * value / total
+            draw.pieslice(box, start, start + sweep, fill=color)
+            start += sweep
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _logo_png() -> bytes | None:
+    if not _LOGO_PATH.exists():
+        return None
+    from PIL import Image
+
+    image = Image.open(_LOGO_PATH).convert("RGB")
+    image.thumbnail((560, 220), Image.Resampling.LANCZOS)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
 
 
 def _donut(slices: list[tuple[float, str]], center: str, center_color: str) -> bytes:
@@ -349,6 +394,119 @@ def _fmt_signed_int(value: int | None) -> str:
     return "0"
 
 
+def _office_label(row: dict[str, Any]) -> str:
+    """مكتب plus the place, so the chart is not the full official title."""
+    short = str(row.get("short_name") or "").strip()
+    if not short:
+        name = str(row.get("name") or "").strip()
+        for prefix in (
+            "المكتب الاستراتيجي لتطوير منطقة ",
+            "المكتب الاستراتيجي لتطوير ",
+            "هيئة تطوير منطقة ",
+            "هيئة تطوير ",
+            "هيئة ",
+        ):
+            if name.startswith(prefix):
+                name = name[len(prefix) :].strip()
+                break
+        short = name
+    if short.startswith("مكتب "):
+        return short
+    return f"مكتب {short}"
+
+
+def _shape_ar(text: str) -> str:
+    """Join Arabic letters and put them in visual order for a drawn chart."""
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+
+    return get_display(arabic_reshaper.reshape(text))
+
+
+def _comparison_chart(window: Sequence[dict[str, Any]]) -> bytes | None:
+    """Horizontal bars for the offices around us. Ours is olive; the others are gold."""
+    if not window:
+        return None
+    from PIL import Image, ImageDraw
+
+    width = 1280
+    row_h = 118
+    height = 24 + len(window) * row_h + 20
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    highest = max(int(row.get("followers") or 0) for row in window) or 1
+    name_font = _font(34, bold=True)
+    small_font = _font(22, bold=True)
+    num_font = _font(26, bold=True)
+    ink = (61, 52, 40)
+    olive = (93, 126, 78)
+    gold = (184, 146, 74)
+    track = (244, 239, 228)
+    labels = [_shape_ar(_office_label(row)) for row in window]
+    name_right = width - 36
+    longest = max(draw.textlength(label, font=name_font) for label in labels)
+    track_right = int(name_right - longest - 36)
+    track_left = 48
+    track_span = max(180, track_right - track_left)
+    for index, row in enumerate(window):
+        top = 16 + index * row_h
+        owned = bool(row.get("owned"))
+        followers = int(row.get("followers") or 0)
+        if owned:
+            draw.rounded_rectangle(
+                [20, top, width - 20, top + row_h - 14],
+                radius=22,
+                fill=(238, 243, 234),
+            )
+        mid = top + (row_h - 14) / 2
+        name = labels[index]
+        draw.text(
+            (name_right, mid - (16 if owned else 0)),
+            name,
+            font=name_font,
+            fill=olive if owned else ink,
+            anchor="rm",
+        )
+        if owned:
+            tag = _shape_ar("حساباتنا")
+            draw.text((name_right, mid + 22), tag, font=small_font, fill=gold, anchor="rm")
+        bar_h = 34
+        bar_top = mid - bar_h / 2 + (8 if owned else 0)
+        draw.rounded_rectangle(
+            [track_left, bar_top, track_right, bar_top + bar_h],
+            radius=17,
+            fill=track,
+        )
+        fill_w = max(36, round(followers / highest * track_span))
+        fill_left = track_right - fill_w
+        draw.rounded_rectangle(
+            [fill_left, bar_top, track_right, bar_top + bar_h],
+            radius=17,
+            fill=olive if owned else gold,
+        )
+        number = f"{followers:,}"
+        number_w = draw.textlength(number, font=num_font)
+        if fill_w > number_w + 36:
+            draw.text(
+                (fill_left + 16, bar_top + bar_h / 2),
+                number,
+                font=num_font,
+                fill=(255, 255, 255),
+                anchor="lm",
+            )
+        else:
+            draw.text(
+                (fill_left - 12, bar_top + bar_h / 2),
+                number,
+                font=num_font,
+                fill=ink,
+                anchor="rm",
+            )
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
 def _comparison_window(
     board: Sequence[dict[str, Any]], above: int = 2, below: int = 1
 ) -> list[dict[str, Any]]:
@@ -498,6 +656,17 @@ def html_to_pdf(page: str) -> bytes | None:
         return pdf_path.read_bytes()
 
 
+def embed_images(page: str, images: dict[str, bytes]) -> str:
+    """Swap cid: pictures for data URIs so a saved HTML or PDF can show them."""
+    import base64
+
+    html_page = page
+    for cid, payload in images.items():
+        encoded = base64.b64encode(payload).decode("ascii")
+        html_page = html_page.replace(f"cid:{cid}", f"data:image/png;base64,{encoded}")
+    return html_page
+
+
 def report_file(page: str) -> tuple[str, bytes, str]:
     """The downloadable report: a PDF when Edge can print one, otherwise the HTML."""
     pdf = html_to_pdf(page)
@@ -515,6 +684,150 @@ def _section(title: str) -> str:
         <td width="22%"><div style="border-top:2px solid {GOLD};line-height:0;font-size:0">&nbsp;</div></td>
       </tr>
     </table>"""
+
+
+def _arrow(color: tuple[int, int, int], up: bool):
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (96, 96), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    if up:
+        points = [(48, 8), (84, 48), (66, 48), (66, 88), (30, 88), (30, 48), (12, 48)]
+    else:
+        points = [(48, 88), (84, 48), (66, 48), (66, 8), (30, 8), (30, 48), (12, 48)]
+    draw.polygon(points, fill=color)
+    return image
+
+
+def _draw_icon(kind: str) -> bytes:
+    """A small solid icon. Mail clients drop transparent pictures."""
+    from PIL import Image, ImageDraw
+
+    olive = (93, 126, 78)
+    green = (33, 166, 90)
+    red = (192, 0, 0)
+    stone = (139, 115, 85)
+    if kind == "up":
+        image = _arrow(green, up=True)
+    elif kind == "down":
+        image = _arrow(red, up=False)
+    else:
+        image = Image.new("RGB", (96, 96), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        if kind == "neutral":
+            draw.rounded_rectangle([14, 40, 82, 56], radius=8, fill=stone)
+        elif kind == "followers":
+            draw.ellipse([34, 12, 62, 40], outline=olive, width=6)
+            draw.arc([18, 36, 78, 92], 200, 340, fill=olive, width=6)
+        elif kind == "extra":
+            draw.polygon(
+                [(48, 12), (76, 44), (60, 44), (60, 84), (36, 84), (36, 44), (20, 44)],
+                fill=olive,
+            )
+        elif kind == "likes":
+            draw.ellipse([16, 22, 50, 56], fill=olive)
+            draw.ellipse([46, 22, 80, 56], fill=olive)
+            draw.polygon([(18, 42), (78, 42), (48, 82)], fill=olive)
+        elif kind == "comments":
+            draw.rounded_rectangle([14, 14, 82, 64], radius=14, outline=olive, width=6)
+            draw.polygon([(26, 60), (46, 60), (24, 84)], fill=olive)
+        elif kind == "news":
+            draw.rounded_rectangle([26, 10, 70, 86], radius=6, outline=olive, width=6)
+            draw.line([(36, 32), (60, 32)], fill=olive, width=5)
+            draw.line([(36, 48), (60, 48)], fill=olive, width=5)
+            draw.line([(36, 64), (52, 64)], fill=olive, width=5)
+        else:
+            for x in (20, 52):
+                for y in (20, 52):
+                    draw.rounded_rectangle([x, y, x + 24, y + 24], radius=5, outline=olive, width=5)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+@lru_cache(maxsize=1)
+def _icon_set() -> dict[str, bytes]:
+    names = (
+        "followers",
+        "extra",
+        "likes",
+        "comments",
+        "news",
+        "platforms",
+        "up",
+        "down",
+        "neutral",
+    )
+    return {name: _draw_icon(name) for name in names}
+
+
+def _insight_cell(cid: str, images: dict[str, bytes], label: str, value: str, rule: bool) -> str:
+    border = "border-bottom:1px solid #eadfca;" if rule else ""
+    return (
+        f'<td width="33%" valign="top" style="text-align:center;padding:12px 4px;{border}">'
+        f"{_image(cid, images, label, width=36)}"
+        f'<div style="font-size:12px;color:{STONE};margin-top:6px;line-height:1.35">{_esc(label)}</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{INK};margin-top:2px">{value}</div>'
+        f"</td>"
+    )
+
+
+def insight_table(
+    followers: str,
+    extra: str,
+    likes: str,
+    comments: str,
+    news: str,
+    platforms: str,
+    positive: str,
+    negative: str,
+    neutral: str,
+) -> tuple[str, dict[str, bytes]]:
+    """A three-by-three stat sheet. Sentiment uses a thumbs-up, thumbs-down, and a dash."""
+    images = {f"stat-{name}": payload for name, payload in _icon_set().items()}
+    rows = [
+        [
+            ("stat-followers", "المتابعون", followers),
+            ("stat-extra", "متابعون إضافيون", extra),
+            ("stat-likes", "إعجابات التعليقات", likes),
+        ],
+        [
+            ("stat-comments", "التعليقات", comments),
+            ("stat-news", "الأخبار", news),
+            ("stat-platforms", "المنصات", platforms),
+        ],
+        [
+            ("stat-up", "الردود الإيجابية", positive),
+            ("stat-down", "الردود السلبية", negative),
+            ("stat-neutral", "الردود المحايدة", neutral),
+        ],
+    ]
+    body = []
+    for index, row in enumerate(rows):
+        cells = "".join(
+            _insight_cell(cid, images, label, value, rule=index < 2)
+            for cid, label, value in row
+        )
+        body.append(f"<tr>{cells}</tr>")
+    html_table = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{WHITE};border:1px solid #eadfca;border-radius:16px">'
+        + "".join(body)
+        + "</table>"
+    )
+    return html_table, images
+
+
+def _comment_likes(rows: Sequence[dict[str, Any]]) -> int | None:
+    found = False
+    total = 0
+    for row in rows:
+        value = row.get("likes")
+        if value is None:
+            continue
+        found = True
+        total += int(value)
+    return total if found else None
 
 
 def _stat_tile(value: str, label: str, background: str, color: str = WHITE) -> str:
@@ -554,16 +867,45 @@ class WeeklyMailer:
             int(row["followers"]) for row in owned_followers if row.get("followers") is not None
         )
         images: dict[str, bytes] = {}
+        try:
+            images["sentiment"] = _pie(
+                [
+                    (positive, _PIE_GREEN),
+                    (negative, _PIE_RED),
+                    (neutral, _PIE_NEUTRAL),
+                ]
+            )
+        except Exception:  # noqa: BLE001 - the percentages still show without the picture
+            log.exception("Comment pie could not be drawn")
+        logo = _logo_png()
+        if logo:
+            images["logo"] = logo
+        likes = _comment_likes(week_comments)
+        platforms = sum(1 for row in owned_followers if row.get("followers") is not None)
+        grid, grid_images = insight_table(
+            _ltr(_fmt_int(follower_total)),
+            _ltr(_fmt_signed_int(extra)),
+            _ltr(_fmt_int(likes)),
+            _ltr(_fmt_int(len(week_comments))),
+            _ltr(_fmt_int(len(week_news))),
+            _ltr(_fmt_int(platforms)),
+            _ltr(_share(positive, scored)),
+            _ltr(_share(negative, scored)),
+            _ltr(_share(neutral, scored)),
+        )
+        images.update(grid_images)
         now = datetime.now(_RIYADH)
         stamp = (
             f"{_WEEKDAYS[now.weekday()]} {now.day} {_MONTHS[now.month - 1]} {now.year}"
             f" · {_ltr(now.strftime('%H:%M'))}"
         )
 
+        logo_img = _image("logo", images, "المكتب الاستراتيجي لتطوير منطقة الجوف", width=280)
+        pie_img = _image("sentiment", images, "نسبة التعليقات", width=168)
         news_cards = self._news_cards(_select_news(week_news, outside_news or None))
         platform_block = self._platforms(owned_followers)
         comment_block = self._comment_sections(week_comments, top_negative, days)
-        comparison_block = self._comparison(ranking)
+        comparison_block = self._comparison(ranking, images)
         dashboard_url = _esc(self.config.dashboard_url)
 
         body = f"""<!DOCTYPE html>
@@ -573,7 +915,10 @@ class WeeklyMailer:
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{PAPER}">
     <tr><td align="center" style="padding:18px 12px 28px">
       <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px;background:{CREAM};border-radius:18px;overflow:hidden">
-        <tr><td style="background:{OLIVE};padding:28px 28px 22px;text-align:center">
+        <tr><td style="background:#000000;text-align:center;padding:18px 16px 14px">
+          {logo_img or f'<div style="color:#f0d9b1;font-size:14px">{_esc("المكتب الاستراتيجي لتطوير منطقة الجوف")}</div>'}
+        </td></tr>
+        <tr><td style="background:{OLIVE};padding:22px 28px 18px;text-align:center">
           <div style="letter-spacing:8px;color:{GOLD};font-size:11px">◆ ◆ ◆</div>
           <div style="margin-top:8px;color:#f0d9b1;font-size:13px">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
           <div style="margin-top:4px;color:{WHITE};font-size:28px;font-weight:700;line-height:1.35">التقرير الأسبوعي</div>
@@ -588,23 +933,22 @@ class WeeklyMailer:
           {_section("ملخص الأسبوع")}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="8">
             <tr>
-              <td valign="middle" style="background:{WHITE};border-radius:16px;padding:16px 12px;text-align:center;border:1px solid #eadfca">
-                <div style="font-size:28px;font-weight:700;color:{OLIVE};line-height:1">{_ltr(_share(positive, scored))}</div>
-                <div style="font-size:12px;color:{STONE};margin-bottom:8px">نسبة التعليقات الإيجابية</div>
-                <div style="font-size:28px;font-weight:700;color:{RED};line-height:1">{_ltr(_share(negative, scored))}</div>
-                <div style="font-size:12px;color:{STONE}">نسبة التعليقات السلبية</div>
-                <div style="font-size:12px;color:{LAVENDER};margin-top:8px">محايد {_ltr(_share(neutral, scored))}</div>
+              <td valign="middle" style="background:{WHITE};border-radius:16px;padding:14px 12px;text-align:center;border:1px solid #eadfca">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+                  <td width="180" valign="middle" align="center">{pie_img}</td>
+                  <td valign="middle" style="text-align:right;padding-right:8px">
+                    <div style="font-size:26px;font-weight:700;color:#21a65a;line-height:1">{_ltr(_share(positive, scored))}</div>
+                    <div style="font-size:12px;color:{STONE};margin:2px 0 8px">نسبة التعليقات الإيجابية <span style="display:inline-block;width:9px;height:9px;background:#21a65a"></span></div>
+                    <div style="font-size:26px;font-weight:700;color:{RED};line-height:1">{_ltr(_share(negative, scored))}</div>
+                    <div style="font-size:12px;color:{STONE};margin:2px 0 8px">نسبة التعليقات السلبية <span style="display:inline-block;width:9px;height:9px;background:{RED}"></span></div>
+                    <div style="font-size:13px;color:{STONE}">محايد {_ltr(_share(neutral, scored))}</div>
+                  </td>
+                </tr></table>
               </td>
             </tr>
           </table>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="margin-top:2px">
-            <tr>
-              {_stat_tile(_ltr(_fmt_int(follower_total)), "إجمالي المتابعين", OLIVE)}
-              {_stat_tile(_ltr(_fmt_signed_int(extra)), "متابعون إضافيون", GOLD, INK)}
-              {_stat_tile(_ltr(_fmt_int(len(week_comments))), "عدد التعليقات", LAVENDER)}
-              {_stat_tile(_ltr(_fmt_int(len(week_news))), "أخبار الأسبوع", OLIVE_DARK)}
-            </tr>
-          </table>
+          {_section("إحصائيات الحسابات")}
+          {grid}
           {_section("المتابعون")}
           {platform_block}
           {comparison_block}
@@ -932,47 +1276,41 @@ class WeeklyMailer:
         <table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>{''.join(cards)}</tr></table>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">{''.join(bars)}</table>"""
 
-    def _comparison(self, board: Sequence[dict[str, Any]]) -> str:
+    def _comparison(self, board: Sequence[dict[str, Any]], images: dict[str, bytes]) -> str:
         window = _comparison_window(board)
         if not window:
             return ""
-        highest = max(int(row.get("followers") or 0) for row in window) or 1
         ours = next((row for row in window if row.get("owned")), None)
         above = [row for row in window if ours and int(row.get("followers") or 0) > int(ours.get("followers") or 0)]
         below = [row for row in window if ours and int(row.get("followers") or 0) < int(ours.get("followers") or 0)]
         note = ""
         if ours and above:
             gap = int(above[-1]["followers"]) - int(ours["followers"])
-            note = f"يفصلنا عن {_esc(above[-1].get('name'))} {_ltr(_fmt_int(gap))} متابعاً"
+            note = f"يفصلنا عن {_esc(_office_label(above[-1]))} {_ltr(_fmt_int(gap))} متابعاً"
         if ours and below:
             lead = int(ours["followers"]) - int(below[0]["followers"])
-            lead_text = f"ونتقدم على {_esc(below[0].get('name'))} بـ {_ltr(_fmt_int(lead))}"
+            lead_text = f"ونتقدم على {_esc(_office_label(below[0]))} بـ {_ltr(_fmt_int(lead))}"
             note = f"{note}، {lead_text}" if note else lead_text
-        rows = []
-        for row in window:
-            owned = bool(row.get("owned"))
-            followers = int(row.get("followers") or 0)
-            width = max(6, round(followers / highest * 100))
-            rows.append(
-                f"""
-                <tr>
-                  <td style="padding:7px 0;font-size:13px;font-weight:{'700' if owned else '400'};color:{INK}">{_esc(row.get('name'))}</td>
-                  <td width="72" style="padding:7px 8px;font-size:13px;font-weight:700;color:{INK}">{_ltr(_fmt_int(followers))}</td>
-                  <td style="padding:7px 0">
-                    <table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td width="{width}%" bgcolor="{OLIVE if owned else GOLD}" style="height:14px;border-radius:8px;font-size:1px">&nbsp;</td>
-                        <td></td>
-                      </tr>
-                    </table>
-                  </td>
-                  <td width="58" style="font-size:11px;color:{OLIVE};font-weight:700">{'حساباتنا' if owned else ''}</td>
-                </tr>"""
+        try:
+            chart = _comparison_chart(window)
+        except Exception:  # noqa: BLE001 - the names still appear in the sentence below
+            log.exception("Comparison chart could not be drawn")
+            chart = None
+        names = " · ".join(_esc(_office_label(row)) for row in window)
+        if chart:
+            images["comparison"] = chart
+            graph = (
+                '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+                f'style="background:{WHITE};border:1px solid #eadfca;border-radius:16px">'
+                f'<tr><td style="padding:12px 8px;text-align:center">'
+                f"{_image('comparison', images, names, width=600)}</td></tr></table>"
             )
+        else:
+            graph = f'<p style="margin:0;font-size:14px;color:{INK}">{names}</p>'
         caption = f'<p style="margin:8px 0 0;font-size:13px;color:{STONE}">{note}.</p>' if note else ""
         return f"""
         {_section("موقفنا بين المكاتب")}
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{''.join(rows)}</table>
+        {graph}
         {caption}"""
 
     def _comment_sections(
@@ -1031,10 +1369,10 @@ class WeeklyMailer:
         return f"{_section(title)}{body}"
 
 
-def _image(cid: str, images: dict[str, bytes], alt: str) -> str:
+def _image(cid: str, images: dict[str, bytes], alt: str, width: int = 140) -> str:
     if cid not in images:
         return ""
     return (
-        f'<img src="cid:{cid}" width="140" height="140" alt="{_esc(alt)}" '
-        f'style="display:block;margin:0 auto;border:0">'
+        f'<img src="cid:{cid}" width="{width}" alt="{_esc(alt)}" '
+        f'style="display:block;margin:0 auto;border:0;max-width:100%">'
     )

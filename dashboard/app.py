@@ -27,8 +27,10 @@ for extra_path in (PROJECT_ROOT / "src", HERE):
 
 from aljouf_report.config import load_config  # noqa: E402
 from aljouf_report.models import DEMO_MODEL_TAG, PLATFORM_AR, SENTIMENT_AR  # noqa: E402
+from aljouf_report.notify.mailer import embed_images, insight_table  # noqa: E402
 from aljouf_report.storage import Database  # noqa: E402
 from theme import (  # noqa: E402
+    ACCENT,
     BENCHMARK_COLORS,
     LINE_DASHES,
     MARKER_SYMBOLS,
@@ -457,36 +459,38 @@ positive_share = (
     sentiment_counts.get("Positive", 0) / total_scored * 100 if total_scored else 0
 )
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    if followers_added is None:
-        follower_delta = None
-        follower_delta_color = "normal"
-    elif followers_added == 0:
-        follower_delta = "بدون تغيير"
-        follower_delta_color = "off"
-    else:
-        follower_delta = f"{followers_added:+,}"
-        follower_delta_color = "normal"
-    st.metric(
-        "إجمالي متابعي حساباتنا",
-        f"{total_now:,}" if total_now is not None else "—",
-        delta=follower_delta,
-        delta_color=follower_delta_color,
-    )
-with col2:
-    st.metric("أخبار ورصد", f"{len(news_df):,}")
-with col3:
-    st.metric("تعليقات محللة", f"{total_scored:,}")
-with col4:
-    st.metric(
-        "نسبة الإيجابية",
-        f"{positive_share:.0f}%",
-        delta=f"{negative_count} تعليق سلبي" if negative_count else "لا سلبيات",
-        delta_color="inverse" if negative_count else "normal",
-    )
-
+if "likes" in comments_f.columns and comments_f["likes"].notna().any():
+    comment_likes = int(comments_f["likes"].fillna(0).sum())
+else:
+    comment_likes = None
+neutral_count = sentiment_counts.get("Neutral", 0)
 by_platform = owned_by_platform(followers_f)
+platform_count = 0 if by_platform.empty else len(by_platform)
+if followers_added is None:
+    extra_label = "—"
+elif followers_added > 0:
+    extra_label = f"+{followers_added:,}"
+elif followers_added < 0:
+    extra_label = f"−{abs(followers_added):,}"
+else:
+    extra_label = "0"
+grid, grid_images = insight_table(
+    f"{total_now:,}" if total_now is not None else "—",
+    extra_label,
+    "—" if comment_likes is None else f"{comment_likes:,}",
+    f"{total_scored:,}",
+    f"{len(news_df):,}",
+    f"{platform_count:,}",
+    f"{positive_share:.0f}%" if total_scored else "—",
+    f"{(negative_count / total_scored * 100):.0f}%" if total_scored else "—",
+    f"{(neutral_count / total_scored * 100):.0f}%" if total_scored else "—",
+)
+st.markdown("##### إحصائيات الحسابات")
+st.markdown(
+    f'<div class="insight-card">{embed_images(grid, grid_images)}</div>',
+    unsafe_allow_html=True,
+)
+
 if not by_platform.empty:
     st.markdown("##### متابعو حساباتنا حسب المنصة")
     for column, (platform, row) in zip(
@@ -560,7 +564,7 @@ with tab_growth:
                     color="النوع",
                     orientation="h",
                     labels={"followers": "عدد المتابعين", "الجهة": ""},
-                    color_discrete_map={"حساباتنا": "#118a6e", "الجهات المرجعية": "#b0bec5"},
+                    color_discrete_map={"حساباتنا": PRIMARY, "الجهات المرجعية": "#c4b49a"},
                     text_auto=".2s",
                 )
                 show_chart(fig, height=460)
@@ -816,7 +820,7 @@ with tab_news:
                     y="الكلمة المفتاحية",
                     orientation="h",
                     text_auto=True,
-                    color_discrete_sequence=["#118a6e"],
+                    color_discrete_sequence=[PRIMARY],
                 )
                 show_chart(fig, height=340)
 
@@ -835,7 +839,7 @@ with tab_news:
                     y="المصدر",
                     orientation="h",
                     text_auto=True,
-                    color_discrete_sequence=["#0b5d4a"],
+                    color_discrete_sequence=[ACCENT],
                 )
                 show_chart(fig, height=340)
 

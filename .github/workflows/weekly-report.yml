@@ -51,6 +51,20 @@ jobs:
       # The database in the repo is what the public dashboard reads. Do not
       # restore an Actions cache over it.
 
+      - name: Require the collection secrets
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          if [ -z "$APIFY_TOKEN" ]; then
+            echo "APIFY_TOKEN is not saved in the repository secrets, so this job cannot collect."
+            exit 1
+          fi
+          if [ -z "$SMTP_PASSWORD" ]; then
+            echo "SMTP_PASSWORD is not saved in the repository secrets, so this job cannot email."
+            exit 1
+          fi
+
       - name: Run pipeline
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}

@@ -108,6 +108,13 @@ class Pipeline:
             summary.errors.append(f"followers: {exc}")
             return
 
+        # A missing token returns an empty count for every account. Saving those
+        # blanks would make the failed run look newer than the last real one.
+        snapshots = [
+            item
+            for item in snapshots
+            if item.followers is not None or "APIFY_TOKEN is not set" not in (item.error or "")
+        ]
         self.db.save_followers(run_id, snapshots)
         public = self._save_public_counts(run_id, summary)
         summary.followers_collected = sum(
@@ -405,18 +412,13 @@ class Pipeline:
     def follower_ranking(self) -> list[dict[str, Any]]:
         """Every authority's latest follower total, largest first."""
         counted = self.db.latest_counted_snapshots()
-        latest_by_entity: dict[str, int] = {}
+        by_entity: dict[str, list[dict[str, Any]]] = {}
         for row in counted:
-            key = str(row["entity_key"])
-            latest_by_entity[key] = max(latest_by_entity.get(key, 0), int(row["run_id"]))
+            if row["platform"] in OWNED_ONLY_PLATFORMS:
+                continue
+            by_entity.setdefault(str(row["entity_key"]), []).append(row)
         board = []
-        for key, run_id in latest_by_entity.items():
-            rows = [
-                row for row in counted
-                if str(row["entity_key"]) == key
-                and int(row["run_id"]) == run_id
-                and row["platform"] not in OWNED_ONLY_PLATFORMS
-            ]
+        for key, rows in by_entity.items():
             if not rows:
                 continue
             entity = next(

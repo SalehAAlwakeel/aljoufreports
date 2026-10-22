@@ -394,19 +394,20 @@ def owned_by_platform(df: pd.DataFrame) -> pd.DataFrame:
     owned = df[df["owned"] & df["followers"].notna()]
     if owned.empty:
         return pd.DataFrame()
-    runs = sorted(owned["run_id"].unique())
-    out = (
-        owned[owned["run_id"] == runs[-1]]
-        .groupby("المنصة")["followers"]
-        .sum()
-        .rename("now")
-        .to_frame()
-    )
-    out["before"] = (
-        owned[owned["run_id"] == runs[-2]].groupby("المنصة")["followers"].sum()
-        if len(runs) >= 2
-        else pd.NA
-    )
+    # Each platform keeps its own last successful count. A later run that
+    # failed to collect Instagram must not replace 12 followers with a blank.
+    latest = owned.loc[owned.groupby("platform")["run_id"].idxmax()]
+    out = latest.groupby("المنصة")["followers"].sum().rename("now").to_frame()
+    previous_rows = []
+    for _, group in owned.groupby("platform"):
+        ordered = group.sort_values("run_id")
+        if len(ordered) >= 2:
+            previous_rows.append(ordered.iloc[-2])
+    if previous_rows:
+        before = pd.DataFrame(previous_rows).groupby("المنصة")["followers"].sum()
+        out["before"] = before.reindex(out.index)
+    else:
+        out["before"] = pd.NA
     out = out.sort_values("now", ascending=False)
     for platform in OWNED_ONLY_PLATFORMS:
         label = PLATFORM_AR[platform]
@@ -606,8 +607,8 @@ with tab_growth:
 
             st.markdown("#### المتابعون حسب المنصة (آخر تشغيل)")
             counted = followers_f.dropna(subset=["followers"])
-            latest_run = counted["run_id"].max()
-            latest = counted[counted["run_id"] == latest_run]
+            ours = counted[counted["owned"]] if "owned" in counted.columns else counted
+            latest = ours.loc[ours.groupby("platform")["run_id"].idxmax()] if not ours.empty else ours
             our_platform_order = [
                 PLATFORM_AR[name]
                 for name in ("instagram", "x", "youtube", "linkedin", "whatsapp", "snapchat")

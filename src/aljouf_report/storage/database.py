@@ -175,9 +175,10 @@ class Database:
         return len(rows)
 
     def latest_counted_snapshots(self) -> list[dict[str, Any]]:
-        """Each office's newest run that stored a follower count.
+        """Each office and platform's newest count.
 
-        A later run that only refreshed one office must not hide the others.
+        A later run that failed, or that only refreshed one platform, must not
+        hide the last successful count for the others.
         """
         with self.connect() as conn:
             return [
@@ -188,12 +189,13 @@ class Database:
                     FROM follower_snapshots f
                     JOIN runs r ON r.id = f.run_id
                     JOIN (
-                        SELECT entity_key, MAX(run_id) AS run_id
+                        SELECT entity_key, platform, MAX(run_id) AS run_id
                         FROM follower_snapshots
                         WHERE followers IS NOT NULL
-                        GROUP BY entity_key
+                        GROUP BY entity_key, platform
                     ) latest
                       ON latest.entity_key = f.entity_key
+                     AND latest.platform = f.platform
                      AND latest.run_id = f.run_id
                     WHERE f.followers IS NOT NULL
                     ORDER BY f.entity_key, f.platform

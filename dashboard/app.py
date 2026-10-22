@@ -297,7 +297,7 @@ if latest_run_time is not None and pd.notna(latest_run_time):
 header(
     "لوحة وسائل التواصل الاجتماعي",
     "المكتب الاستراتيجي لتطوير منطقة الجوف",
-    "تقرير آلي أسبوعي",
+    "تقرير آلي كل أسبوعين",
     updated,
 )
 

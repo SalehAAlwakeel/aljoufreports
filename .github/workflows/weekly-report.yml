@@ -1,13 +1,10 @@
-name: Weekly social media report
+name: Social report every two weeks
 
 on:
   schedule:
-    # Sundays 06:00 UTC = 09:00 Riyadh (AST, UTC+3). Sunday is the start of
-    # the Saudi work week.
+    # Every Sunday 06:00 UTC = 09:00 Riyadh. The job then sends only on even
+    # ISO weeks, which is every other Sunday: 1 Nov, 15 Nov, 29 Nov, and so on.
     - cron: "0 6 * * 0"
-    # The source brief also asks for the 1st and 15th at 09:00 Riyadh.
-    # Uncomment to add that cadence alongside the weekly run.
-    # - cron: "0 6 1,15 * *"
   workflow_dispatch:
     inputs:
       skip_email:
@@ -28,22 +25,45 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Send only every second Sunday
+        id: cadence
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != "schedule" ]; then
+            echo "send=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run: sending."
+            exit 0
+          fi
+          week=$(date -u +%V)
+          if [ $((10#$week % 2)) -eq 0 ]; then
+            echo "send=true" >> "$GITHUB_OUTPUT"
+            echo "Week $week: sending the report."
+          else
+            echo "send=false" >> "$GITHUB_OUTPUT"
+            echo "Week $week: skipping. The report is sent every two weeks."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.cadence.outputs.send == 'true'
         with:
           persist-credentials: true
 
       - uses: actions/setup-python@v5
+        if: steps.cadence.outputs.send == 'true'
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
+        if: steps.cadence.outputs.send == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
 
       - name: Install Chromium for the PDF
+        if: steps.cadence.outputs.send == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
@@ -52,6 +72,7 @@ jobs:
       # restore an Actions cache over it.
 
       - name: Require the collection secrets
+        if: steps.cadence.outputs.send == 'true'
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
@@ -66,6 +87,7 @@ jobs:
           fi
 
       - name: Run pipeline
+        if: steps.cadence.outputs.send == 'true'
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -83,7 +105,7 @@ jobs:
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}
 
       - name: Publish the updated database
-        if: success()
+        if: success() && steps.cadence.outputs.send == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -91,12 +113,12 @@ jobs:
           if git diff --cached --quiet; then
             echo "Database unchanged."
           else
-            git commit -m "Update the collected database after the weekly run."
+            git commit -m "Update the collected database after the scheduled run."
             git push
           fi
 
       - name: Upload logs and database
-        if: always()
+        if: always() && steps.cadence.outputs.send == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: run-artifacts

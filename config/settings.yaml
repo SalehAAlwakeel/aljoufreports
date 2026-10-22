@@ -175,7 +175,7 @@ apify:
     linkedin_comments: apimaestro/linkedin-post-comments-replies-engagements-scraper-no-cookies
 
 email:
-  subject_prefix: "تقرير وسائل التواصل الأسبوعي | JSDO"
+  subject_prefix: "تقرير وسائل التواصل كل أسبوعين | JSDO"
   recipients:
     - ajkattan@jsdo.gov.sa
     - wakeelsaleh@gmail.com

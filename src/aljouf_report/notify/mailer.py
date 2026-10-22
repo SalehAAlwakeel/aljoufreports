@@ -953,7 +953,7 @@ class WeeklyMailer:
         <tr><td style="background:{OLIVE};padding:22px 28px 18px;text-align:center">
           <div style="letter-spacing:8px;color:{GOLD};font-size:11px">◆ ◆ ◆</div>
           <div style="margin-top:8px;color:#f0d9b1;font-size:13px">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
-          <div style="margin-top:4px;color:{WHITE};font-size:28px;font-weight:700;line-height:1.35">التقرير الأسبوعي</div>
+          <div style="margin-top:4px;color:{WHITE};font-size:28px;font-weight:700;line-height:1.35">تقرير كل أسبوعين</div>
           <div style="color:{CREAM};font-size:15px">وسائل التواصل الاجتماعي</div>
         </td></tr>
         <tr><td style="background:{OLIVE_DARK};color:{CREAM};text-align:center;padding:9px 16px;font-size:13px">
@@ -1055,7 +1055,7 @@ class WeeklyMailer:
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{OLIVE};color:{WHITE};text-align:center">
 <tr><td style="padding:18px 16px">
 <div style="font-size:13px;color:#f0d9b1">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
-<div style="font-size:24px;font-weight:700;margin-top:4px">التقرير الأسبوعي</div>
+<div style="font-size:24px;font-weight:700;margin-top:4px">تقرير كل أسبوعين</div>
 <div style="font-size:13px;margin-top:4px">آخر {_ltr(str(days))} أيام · {stamp}</div>
 </td></tr></table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:14px 16px 18px">
@@ -1085,7 +1085,7 @@ class WeeklyMailer:
         negative = _share(int(sentiment.get("Negative", 0)), scored)
         total = summary.followers_collected if follower_total is None else follower_total
         return (
-            "التقرير الأسبوعي - المكتب الاستراتيجي لتطوير منطقة الجوف\n"
+            "تقرير كل أسبوعين - المكتب الاستراتيجي لتطوير منطقة الجوف\n"
             f"التشغيل رقم: {summary.run_id}\n"
             f"المتابعون: {total:,}\n"
             f"التعليقات الإيجابية: {positive}\n"

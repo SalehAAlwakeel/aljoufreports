@@ -381,6 +381,8 @@ def _extra_followers(rows: Sequence[dict[str, Any]]) -> int | None:
     found = False
     total = 0
     for row in rows:
+        if row.get("platform") in OWNED_ONLY_PLATFORMS:
+            continue
         if row.get("delta") is None or row.get("followers") is None:
             continue
         found = True

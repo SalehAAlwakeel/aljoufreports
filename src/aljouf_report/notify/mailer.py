@@ -807,7 +807,7 @@ def insight_table(
         [
             ("stat-followers", "المتابعون", followers),
             ("stat-extra", "متابعون إضافيون", extra),
-            ("stat-likes", "إعجابات الأسبوع", likes),
+            ("stat-likes", "إعجابات الأسبوعين", likes),
         ],
         [
             ("stat-comments", "التعليقات", comments),
@@ -959,12 +959,12 @@ class WeeklyMailer:
           <div style="color:{CREAM};font-size:15px">وسائل التواصل الاجتماعي</div>
         </td></tr>
         <tr><td style="background:{OLIVE_DARK};color:{CREAM};text-align:center;padding:9px 16px;font-size:13px">
-          آخر {_ltr(str(days))} أيام · {stamp}
+          آخر أسبوعين · {stamp}
         </td></tr>
         <tr><td class="jsdo-pad" align="center" style="padding:8px 16px 26px;text-align:center;">
           {_section("أبرز الأخبار")}
           {news_cards}
-          {_section("ملخص الأسبوع")}
+          {_section("ملخص الأسبوعين")}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="8">
             <tr>
               <td align="center" valign="middle" style="background:{WHITE};border-radius:16px;padding:14px 12px;text-align:center;border:1px solid #eadfca">
@@ -1058,13 +1058,13 @@ class WeeklyMailer:
 <tr><td style="padding:18px 16px">
 <div style="font-size:13px;color:#f0d9b1">المكتب الاستراتيجي لتطوير منطقة الجوف</div>
 <div style="font-size:24px;font-weight:700;margin-top:4px">تقرير كل أسبوعين</div>
-<div style="font-size:13px;margin-top:4px">آخر {_ltr(str(days))} أيام · {stamp}</div>
+<div style="font-size:13px;margin-top:4px">آخر أسبوعين · {stamp}</div>
 </td></tr></table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:14px 16px 18px">
 <div style="text-align:center;margin:0 0 14px">{download} {dashboard}{download_note}</div>
 <div style="font-size:16px;font-weight:700;color:{OLIVE};margin:0 0 8px">أبرز الأخبار</div>
 {_news_lines(news)}
-<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">ملخص الأسبوع</div>
+<div style="font-size:16px;font-weight:700;color:{OLIVE};margin:14px 0 8px">ملخص الأسبوعين</div>
 <div style="background:{WHITE};border:1px solid #eadfca;border-radius:12px;padding:12px;text-align:center">
 <div style="font-size:22px;font-weight:700;color:{OLIVE}">{_ltr(_share(positive, scored))} <span style="font-size:13px;font-weight:400;color:{STONE}">إيجابية</span></div>
 <div style="font-size:22px;font-weight:700;color:{RED};margin-top:4px">{_ltr(_share(negative, scored))} <span style="font-size:13px;font-weight:400;color:{STONE}">سلبية</span>
@@ -1183,11 +1183,20 @@ class WeeklyMailer:
                     server.starttls()
                     server.ehlo()
                 server.login(secrets.smtp_username, secrets.smtp_password)
-                server.send_message(message)
+                refused = server.send_message(message)
         except (smtplib.SMTPException, OSError) as exc:
             raise EmailNotConfigured(f"Failed to send the weekly email: {exc}") from exc
 
-        log.info("Email sent to %s", ", ".join(recipients))
+        if refused:
+            failed = ", ".join(refused)
+            raise EmailNotConfigured(f"The mail server refused: {failed}")
+
+        log.info(
+            "Mail server accepted %s (%d bytes) for %s",
+            message["Subject"],
+            len(message.as_bytes()),
+            ", ".join(recipients),
+        )
         return recipients
 
     def _charts(
@@ -1410,7 +1419,7 @@ class WeeklyMailer:
                 "التعليقات السلبية": "تعليقات سلبية",
                 "التعليقات المحايدة": "تعليقات محايدة",
             }.get(title, "تعليقات")
-            empty = f"لا توجد {empty_label} خلال آخر {_ltr(str(days))} أيام."
+            empty = f"لا توجد {empty_label} خلال آخر أسبوعين."
             body = (
                 f'<p style="margin:0;background:{WHITE};border:1px solid #eadfca;border-radius:12px;'
                 f'padding:12px 14px;color:{STONE}">{empty}</p>'

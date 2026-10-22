@@ -99,7 +99,7 @@ def test_briefing_shows_gain_comments_and_neighbors():
             {"name": "الحدود الشمالية", "owned": False, "followers": 2188},
         ],
     )
-    assert html.index("خبر سكاكا") < html.index("ملخص الأسبوع")
+    assert html.index("خبر سكاكا") < html.index("ملخص الأسبوعين")
     assert "السعودية تنجح في استثمار جديد" in html and "السعودية تفوز بكأس الخليج" in html
     assert "نسبة التعليقات الإيجابية" in html
     assert "إحصائيات الحسابات" in html

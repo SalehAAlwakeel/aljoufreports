@@ -5,8 +5,8 @@ windows:
   # Stored comments stay on the dashboard for this long.
   # The 90-day archive is already collected; do not use this as the scrape window.
   comments_lookback_days: 90
-  # Weekly email and each new comment scrape cover only this many days.
-  comments_scrape_days: 7
+  # The report and each new comment scrape cover the two weeks since the last send.
+  comments_scrape_days: 14
 
 news:
   # Google News RSS and GDELT are both keyless public endpoints, so news

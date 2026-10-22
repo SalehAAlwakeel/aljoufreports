@@ -88,7 +88,7 @@ class Windows(BaseModel):
     comments_lookback_days: int = 90
     # How far back a pipeline run scrapes. Weekly runs must not re-fetch the
     # archive already stored under comments_lookback_days.
-    comments_scrape_days: int = 7
+    comments_scrape_days: int = 14
 
 
 class NewsKeyword(BaseModel):

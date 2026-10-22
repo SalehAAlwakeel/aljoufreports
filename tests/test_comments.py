@@ -24,8 +24,8 @@ def test_weekly_scrape_stops_at_seven_days_and_keeps_the_archive(monkeypatch, tm
     age = datetime.now(timezone.utc) - collector._cutoff
 
     assert config.settings.windows.comments_lookback_days == 90
-    assert config.settings.windows.comments_scrape_days == 7
-    assert timedelta(days=6) <= age <= timedelta(days=8)
+    assert config.settings.windows.comments_scrape_days == 14
+    assert timedelta(days=13) <= age <= timedelta(days=15)
 
 
 def test_targets_keep_every_post_with_comments_inside_the_window():

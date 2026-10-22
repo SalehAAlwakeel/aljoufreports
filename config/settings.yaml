@@ -177,11 +177,14 @@ apify:
 email:
   subject_prefix: "تقرير وسائل التواصل كل أسبوعين | JSDO"
   recipients:
-    - ajkattan@jsdo.gov.sa
-    - wakeelsaleh@gmail.com
     - a.shuqair@jsdo.gov.sa
-    - exc.social@jsdo.gov.sa
-    - laith.louid@jo.ey.com
+    - ajkattan@jsdo.gov.sa
+    - h.zainaddin@jsdo.gov.sa
+    - f.alsaqar@jsdo.gov.sa
+    - a.massoud@jsdo.gov.sa
+    - w.alkulaib@jsdo.gov.sa
+    - Exc.social@jsdo.gov.sa
+    - Laith.louid@jo.ey.com
   # Shown in the email body as the link to the live dashboard.
   # Override with DASHBOARD_URL in .env.
   dashboard_url: https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/

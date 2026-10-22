@@ -2,9 +2,9 @@ name: Social report every two weeks
 
 on:
   schedule:
-    # Every Sunday 06:00 UTC = 09:00 Riyadh. The job then sends only on even
-    # ISO weeks, which is every other Sunday: 1 Nov, 15 Nov, 29 Nov, and so on.
-    - cron: "0 6 * * 0"
+    # Every Thursday 18:00 UTC = 21:00 Riyadh. The job then sends only every
+    # other Thursday, starting 5 Nov 2026: 5 Nov, 19 Nov, 3 Dec, and so on.
+    - cron: "0 18 * * 4"
   workflow_dispatch:
     inputs:
       skip_email:
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Send only every second Sunday
+      - name: Send every second Thursday at 9 PM Al Jouf
         id: cadence
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -35,13 +35,20 @@ jobs:
             echo "Manual run: sending."
             exit 0
           fi
-          week=$(date -u +%V)
-          if [ $((10#$week % 2)) -eq 0 ]; then
+          today=$(date -u +%Y-%m-%d)
+          anchor=2026-11-05
+          if [[ "$today" < "$anchor" ]]; then
+            echo "send=false" >> "$GITHUB_OUTPUT"
+            echo "$today is before the first Thursday send on $anchor."
+            exit 0
+          fi
+          days=$(( ( $(date -u -d "$today" +%s) - $(date -u -d "$anchor" +%s) ) / 86400 ))
+          if [ $((days % 14)) -eq 0 ]; then
             echo "send=true" >> "$GITHUB_OUTPUT"
-            echo "Week $week: sending the report."
+            echo "Thursday $today: sending the report."
           else
             echo "send=false" >> "$GITHUB_OUTPUT"
-            echo "Week $week: skipping. The report is sent every two weeks."
+            echo "Thursday $today: skipping until the next two-week Thursday."
           fi
 
       - uses: actions/checkout@v4
@@ -99,7 +106,7 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'ajkattan@jsdo.gov.sa,wakeelsaleh@gmail.com,a.shuqair@jsdo.gov.sa,exc.social@jsdo.gov.sa,laith.louid@jo.ey.com' }}
+          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'a.shuqair@jsdo.gov.sa,ajkattan@jsdo.gov.sa,h.zainaddin@jsdo.gov.sa,f.alsaqar@jsdo.gov.sa,a.massoud@jsdo.gov.sa,w.alkulaib@jsdo.gov.sa,Exc.social@jsdo.gov.sa,Laith.louid@jo.ey.com' }}
           DASHBOARD_URL: ${{ vars.DASHBOARD_URL != '' && vars.DASHBOARD_URL || 'https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/' }}
         run: |
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}

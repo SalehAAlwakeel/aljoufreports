@@ -278,9 +278,9 @@ Get-ScheduledTaskInfo -TaskName 'JSDO Weekly Social Report'
 
 ### GitHub Actions (hosted)
 
-`.github/workflows/weekly-report.yml` checks every Sunday at 06:00 UTC
-(09:00 Riyadh) and sends every other Sunday. It can also be triggered
-manually. Add `APIFY_TOKEN`, `OPENAI_API_KEY`,
+`.github/workflows/weekly-report.yml` checks every Thursday at 18:00 UTC
+(21:00 Riyadh) and sends every other Thursday, starting 5 November 2026.
+It can also be triggered manually. Add `APIFY_TOKEN`, `OPENAI_API_KEY`,
 `GOOGLE_SHEETS_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`, and the `SMTP_*` values as
 repository secrets, and `EMAIL_RECIPIENTS` / `DASHBOARD_URL` as variables.
 

@@ -106,7 +106,9 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS != '' && vars.EMAIL_RECIPIENTS || 'a.shuqair@jsdo.gov.sa,ajkattan@jsdo.gov.sa,h.zainaddin@jsdo.gov.sa,f.alsaqar@jsdo.gov.sa,a.massoud@jsdo.gov.sa,w.alkulaib@jsdo.gov.sa,Exc.social@jsdo.gov.sa,Laith.louid@jo.ey.com' }}
+          # Recipients are email.recipients in config/settings.yaml, which the
+          # control page edits. Do not set EMAIL_RECIPIENTS here or it would
+          # hide that list.
           DASHBOARD_URL: ${{ vars.DASHBOARD_URL != '' && vars.DASHBOARD_URL || 'https://aljoufreports-mr5e35jqhtlstznnrrmrnf.streamlit.app/' }}
         run: |
           python -m aljouf_report run ${{ inputs.skip_email && '--skip-email' || '' }}

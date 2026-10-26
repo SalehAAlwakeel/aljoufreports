@@ -169,11 +169,29 @@ frames = load_frames(db_path)
 followers_df = frames["followers"]
 news_df = frames["news"]
 comments_df = frames["comments"]
+# A competitor removed on the control page leaves old rows in the database.
+# Charts follow the current account list, so a removed office disappears now.
+known_keys = {entity.key for entity in config.accounts.entities}
+if not followers_df.empty and "entity_key" in followers_df.columns:
+    followers_df = followers_df[followers_df["entity_key"].isin(known_keys)].copy()
 
 
 # --------------------------------------------------------------------------- #
 # Sidebar filters
 # --------------------------------------------------------------------------- #
+page = st.segmented_control(
+    "الصفحة",
+    options=["التقرير", "التحكم"],
+    default="التقرير",
+    key="page",
+    label_visibility="collapsed",
+)
+if page == "التحكم":
+    from control_page import render_control
+
+    render_control()
+    st.stop()
+
 with st.sidebar:
     st.markdown("### ⚙️ العرض")
     if st.button("🔄 تحديث البيانات", width="stretch"):

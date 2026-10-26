@@ -405,10 +405,20 @@ h5 {{
     line-height: 1.5;
 }}
 
-/* Hide the Streamlit chrome so the report is the whole page. */
+/* Hide the Streamlit chrome so the report is the whole page.
+   The header bar stays in the hit-test layer even when it is empty, and it
+   was swallowing clicks on the page switch at the top. */
 #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {{
     visibility: hidden;
     height: 0;
+}}
+[data-testid="stHeader"] {{
+    pointer-events: none;
+    background: transparent;
+}}
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapsedControl"] {{
+    pointer-events: auto;
 }}
 
 /* Streamlit slides a closed sidebar off-screen with translateX. In RTL that

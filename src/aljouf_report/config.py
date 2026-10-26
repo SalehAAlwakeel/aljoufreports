@@ -291,7 +291,12 @@ class AppConfig(BaseModel):
 
     @property
     def recipients(self) -> list[str]:
-        return self.secrets.email_recipients or self.settings.email.recipients
+        # The control page writes config/settings.yaml. That list is the one
+        # the report uses. The environment variable is only a fallback when
+        # the file has no addresses.
+        if self.settings.email.recipients:
+            return list(self.settings.email.recipients)
+        return self.secrets.email_recipients
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
